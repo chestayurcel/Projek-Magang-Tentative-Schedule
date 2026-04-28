@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --color-kai-blue: #0F1551;
+  --color-kai-orange: #ED7200;
+  --color-kai-bg: #F8FAFC;
+}
+
+body {
+  background-color: var(--color-kai-bg);
+  color: #1E293B;
+  min-height: 100vh;
+}
