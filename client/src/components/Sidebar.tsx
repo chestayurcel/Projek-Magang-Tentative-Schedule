@@ -62,10 +62,6 @@ export default function Sidebar() {
               <span className="font-medium tracking-wide text-sm">Persetujuan Jadwal</span>
             </Link>
 
-            <div className="pt-4 pb-2 px-4">
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Administrator</p>
-            </div>
-
             <Link
               to="/admin/users"
               className={`flex items-center space-x-3 px-4 py-3.5 rounded-lg transition-all duration-200 ${
