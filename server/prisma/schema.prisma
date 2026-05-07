@@ -55,6 +55,7 @@ model User {
 
   schedules        Schedule[]    @relation("UserSchedules")
   targetedSchedules Schedule[]   @relation("TargetUserSchedules")
+  createdSchedules Schedule[]    @relation("CreatorSchedules")
 
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -103,6 +104,9 @@ model Schedule {
   
   target_user_id Int?
   target_user    User?           @relation("TargetUserSchedules", fields: [target_user_id], references: [id])
+  
+  created_by     Int?
+  creator        User?           @relation("CreatorSchedules", fields: [created_by], references: [id])
   
   start_time     DateTime
   end_time       DateTime

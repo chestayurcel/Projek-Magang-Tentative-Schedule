@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { User, Mail, Lock, Building, CheckCircle, Shield } from "lucide-react";
+import { User, Mail, Lock, Building, CheckCircle, Shield, Tag } from "lucide-react";
 import api from "../lib/api";
 
 interface Unit {
@@ -52,7 +52,7 @@ export default function RegisterPage() {
           KAI <span className="text-[#ff7900]">DAOP 6</span>
         </h2>
         <p className="mt-2 text-center text-sm text-slate-300">
-          Sistem Manajemen Jadwal Operasional & Tamu
+          Sistem Manajemen Jadwal Kegiatan
         </p>
       </div>
 
@@ -134,7 +134,7 @@ export default function RegisterPage() {
                     type="email"
                     required
                     className="pl-10 block w-full text-sm border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0c1040] focus:border-[#0c1040] py-2.5 outline-none border transition"
-                    placeholder="nama@kai.id"
+                    placeholder="Masukkan email pegawai anda"
                   />
                 </div>
               </div>
@@ -161,7 +161,7 @@ export default function RegisterPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700">Jabatan / Tingkat</label>
+                <label className="block text-sm font-medium text-slate-700">Jabatan</label>
                 <div className="mt-1 relative rounded-md shadow-sm">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <Shield className="h-5 w-5 text-slate-400" />
@@ -177,6 +177,21 @@ export default function RegisterPage() {
                     <option value="SUPERVISOR">Supervisor</option>
                     <option value="STAFF">Staff</option>
                   </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Kode / Nama Jabatan</label>
+                <div className="mt-1 relative rounded-md shadow-sm">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Tag className="h-5 w-5 text-slate-400" />
+                  </div>
+                  <input
+                    name="jabatan"
+                    type="text"
+                    className="pl-10 block w-full text-sm border-slate-300 rounded-lg focus:ring-2 focus:ring-[#0c1040] focus:border-[#0c1040] py-2.5 outline-none border transition"
+                    placeholder="Opsional"
+                  />
                 </div>
               </div>
 

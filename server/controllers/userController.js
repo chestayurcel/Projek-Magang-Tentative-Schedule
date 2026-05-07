@@ -196,5 +196,59 @@ async function rejectUser(req, res) {
     res.status(500).json({ error: 'Gagal menolak user' });
   }
 }
+// Ambil Profil Sendiri
+async function getProfile(req, res) {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: { unit: { select: { unit_name: true } } }
+    });
 
-module.exports = { getUsers, createUser, updateUser, deleteUser, approveUser, rejectUser };
+    if (!user) return res.status(404).json({ error: 'User tidak ditemukan' });
+
+    const { password, ...safeUser } = user;
+    res.json(safeUser);
+  } catch (error) {
+    console.error('getProfile error:', error);
+    res.status(500).json({ error: 'Gagal mengambil data profil' });
+  }
+}
+
+// Update Password Sendiri
+async function updatePassword(req, res) {
+  const { oldPassword, newPassword } = req.body;
+
+  if (!oldPassword || !newPassword) {
+    return res.status(400).json({ error: 'Password lama dan password baru wajib diisi' });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'Password baru minimal 6 karakter' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user) return res.status(404).json({ error: 'User tidak ditemukan' });
+
+    // Cek password lama
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: 'Password lama salah' });
+    }
+
+    // Hash password baru
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { password: hashedPassword }
+    });
+
+    res.json({ message: 'Password berhasil diperbarui' });
+  } catch (error) {
+    console.error('updatePassword error:', error);
+    res.status(500).json({ error: 'Gagal memperbarui password' });
+  }
+}
+
+module.exports = { getUsers, createUser, updateUser, deleteUser, approveUser, rejectUser, getProfile, updatePassword };

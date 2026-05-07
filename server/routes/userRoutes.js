@@ -3,7 +3,7 @@ const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
-const { getUsers, approveUser, rejectUser, createUser, updateUser, deleteUser } = require('../controllers/userController');
+const { getUsers, approveUser, rejectUser, createUser, updateUser, deleteUser, getProfile, updatePassword } = require('../controllers/userController');
 
 // Endpoint publik (diperlukan untuk dropdown saat membuat jadwal)
 router.get('/active', async (req, res) => {
@@ -19,9 +19,14 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// Proteksi global (minimal Asisten Manajer untuk bisa GET)
+// Proteksi global
 router.use(verifyToken);
 
+// Rute Profil (bisa diakses semua role)
+router.get('/profile', getProfile);
+router.put('/update-password', updatePassword);
+
+// Rute Manajemen Pegawai (dibatasi role)
 router.get('/', verifyRole('SUPER_ADMIN', 'MANAJER', 'ASISTEN_MANAJER'), getUsers);
 
 // Aksi yang bisa dilakukan oleh SUPER_ADMIN & MANAJER

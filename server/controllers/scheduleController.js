@@ -55,7 +55,7 @@ async function getSchedules(req, res) {
 async function createSchedule(req, res) {
   const userId = req.user.id;
   const userRole = req.user.role;
-  const { start_date, start_time, end_date, end_time, notes, category, target_user_id } = req.body;
+  const { start_date, start_time, end_date, end_time, notes, category, target_user_id, actionType } = req.body;
 
   if (!start_date || !start_time || !end_date || !end_time) {
     return res.status(400).json({ error: 'Tanggal dan waktu mulai serta selesai wajib diisi.' });
@@ -71,23 +71,30 @@ async function createSchedule(req, res) {
     const combinedStartTime = new Date(`${start_date}T${start_time}:00`);
     const combinedEndTime = new Date(`${end_date}T${end_time}:00`);
 
-    // Pengecekan Bentrok
+    // Pengecekan Bentrok (untuk pemilik jadwal akhir)
+    const finalUserId = (actionType === 'DELEGATION' && target_user_id) ? parseInt(target_user_id) : userId;
+    
     const existingConflict = await prisma.schedule.findFirst({
       where: {
-        user_id: userId,
+        user_id: finalUserId,
         start_time: { lt: combinedEndTime },
         end_time: { gt: combinedStartTime }
       }
     });
 
     if (existingConflict) {
-      return res.status(400).json({ error: 'Gagal: Anda sudah memiliki jadwal lain di jam tersebut.' });
+      return res.status(400).json({ error: 'Gagal: Terdapat jadwal lain di jam tersebut untuk pengguna ini.' });
     }
 
-    // Tentukan status berdasarkan role dan visibilitas
+    let finalTargetUserId = target_user_id ? parseInt(target_user_id) : null;
+    let finalCreatedBy = null;
     let status = "PENDING";
-    if (target_user_id && parseInt(target_user_id) !== userId) {
-      // Jika menargetkan user lain, SELALU PENDING (menunggu persetujuan target)
+
+    if (actionType === 'DELEGATION') {
+      finalTargetUserId = null;
+      finalCreatedBy = userId;
+      status = "PENDING";
+    } else if (actionType === 'MEETING' || (target_user_id && parseInt(target_user_id) !== userId)) {
       status = "PENDING";
     } else if (userRole === "SUPER_ADMIN" || userRole === "MANAJER" || userRole === "ASISTEN_MANAJER") {
       status = "APPROVED"; // Manajer ke atas langsung disetujui
@@ -98,13 +105,14 @@ async function createSchedule(req, res) {
     const schedule = await prisma.schedule.create({
       data: {
         type: "INTERNAL",
-        user_id: userId,
+        user_id: finalUserId,
         start_time: combinedStartTime,
         end_time: combinedEndTime,
         notes: notes || null,
         category: category || "PRIBADI",
         status,
-        target_user_id: target_user_id ? parseInt(target_user_id) : null,
+        target_user_id: finalTargetUserId,
+        created_by: finalCreatedBy,
       },
     });
 
@@ -190,12 +198,16 @@ async function getIncomingSchedules(req, res) {
   try {
     const schedules = await prisma.schedule.findMany({
       where: {
-        target_user_id: userId,
         status: "PENDING",
+        OR: [
+          { target_user_id: userId }, // Meeting
+          { user_id: userId, created_by: { not: null } } // Delegasi
+        ]
       },
       include: {
         user: { select: { id: true, name: true, nipp: true, role: true } },
         target_user: { select: { id: true, name: true } },
+        creator: { select: { id: true, name: true, role: true } }
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -222,17 +234,23 @@ async function respondSchedule(req, res) {
   }
 
   try {
-    // Cari jadwal dan pastikan user ini memang target-nya
+    // Cari jadwal dan pastikan user ini memang target-nya atau pemiliknya
     const schedule = await prisma.schedule.findUnique({
       where: { id: parseInt(id) },
-      include: { user: { select: { name: true } } },
+      include: { 
+        user: { select: { name: true } },
+        creator: { select: { name: true } }
+      },
     });
 
     if (!schedule) {
       return res.status(404).json({ error: 'Jadwal tidak ditemukan.' });
     }
 
-    if (schedule.target_user_id !== userId) {
+    const isTarget = schedule.target_user_id === userId;
+    const isOwnerDelegated = schedule.user_id === userId && schedule.created_by !== null;
+
+    if (!isTarget && !isOwnerDelegated) {
       return res.status(403).json({ error: 'Anda tidak berhak merespons jadwal ini.' });
     }
 
@@ -248,7 +266,8 @@ async function respondSchedule(req, res) {
     });
 
     const msg = action === 'approve' ? 'disetujui' : 'ditolak';
-    return res.status(200).json({ message: `Undangan jadwal dari ${schedule.user?.name} berhasil ${msg}.`, schedule: updated });
+    const senderName = isOwnerDelegated ? schedule.creator?.name : schedule.user?.name;
+    return res.status(200).json({ message: `Jadwal dari ${senderName} berhasil ${msg}.`, schedule: updated });
   } catch (error) {
     console.error('respondSchedule error:', error);
     return res.status(500).json({ error: 'Gagal merespons undangan jadwal.' });

@@ -89,58 +89,58 @@ export default function Sidebar() {
               <Building size={20} className={pathname === "/admin/units" ? "opacity-100" : "opacity-70"} />
               <span className="font-medium tracking-wide text-sm">Manajemen Unit</span>
             </Link>
-
-            {/* Collapsible Settings Menu */}
-            <div className="pt-1">
-              <button
-                onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-                className={`w-full flex items-center justify-between px-4 py-3.5 rounded-lg transition-all duration-200 ${
-                  pathname.startsWith("/admin/settings") && !isSettingsOpen
-                    ? "bg-white/10 text-white"
-                    : "hover:bg-white/5 text-slate-300 hover:text-white"
-                }`}
-              >
-                <div className="flex items-center space-x-3">
-                  <Settings size={20} className="opacity-70" />
-                  <span className="font-medium tracking-wide text-sm">Pengaturan</span>
-                </div>
-                {isSettingsOpen ? <ChevronDown size={16} className="opacity-50" /> : <ChevronRight size={16} className="opacity-50" />}
-              </button>
-
-              <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isSettingsOpen ? 'max-h-40 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
-                <div className="pl-11 pr-4 py-1 space-y-1">
-                  
-                  <Link
-                    to="/admin/settings/profile"
-                    className={`flex items-center space-x-2.5 px-3 py-2.5 rounded-md transition-all duration-200 ${
-                      pathname === "/admin/settings/profile"
-                        ? "bg-white/10 text-white"
-                        : "text-slate-400 hover:text-white hover:bg-white/5"
-                    }`}
-                  >
-                    <Shield size={16} />
-                    <span className="text-xs font-medium">Keamanan & Profil</span>
-                  </Link>
-
-                  {isSuperAdmin && (
-                    <Link
-                      to="/admin/settings/logs"
-                      className={`flex items-center space-x-2.5 px-3 py-2.5 rounded-md transition-all duration-200 ${
-                        pathname === "/admin/settings/logs"
-                          ? "bg-white/10 text-white"
-                          : "text-slate-400 hover:text-white hover:bg-white/5"
-                      }`}
-                    >
-                      <Activity size={16} />
-                      <span className="text-xs font-medium">Riwayat Aktivitas</span>
-                    </Link>
-                  )}
-
-                </div>
-              </div>
-            </div>
           </>
         )}
+
+        {/* Collapsible Settings Menu */}
+        <div className="pt-1">
+          <button
+            onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+            className={`w-full flex items-center justify-between px-4 py-3.5 rounded-lg transition-all duration-200 ${
+              pathname.startsWith("/admin/settings") && !isSettingsOpen
+                ? "bg-white/10 text-white"
+                : "hover:bg-white/5 text-slate-300 hover:text-white"
+            }`}
+          >
+            <div className="flex items-center space-x-3">
+              <Settings size={20} className="opacity-70" />
+              <span className="font-medium tracking-wide text-sm">Pengaturan</span>
+            </div>
+            {isSettingsOpen ? <ChevronDown size={16} className="opacity-50" /> : <ChevronRight size={16} className="opacity-50" />}
+          </button>
+
+          <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isSettingsOpen ? 'max-h-40 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
+            <div className="pl-11 pr-4 py-1 space-y-1">
+              
+              <Link
+                to="/admin/settings/profile"
+                className={`flex items-center space-x-2.5 px-3 py-2.5 rounded-md transition-all duration-200 ${
+                  pathname === "/admin/settings/profile"
+                    ? "bg-white/10 text-white"
+                    : "text-slate-400 hover:text-white hover:bg-white/5"
+                }`}
+              >
+                <Shield size={16} />
+                <span className="text-xs font-medium">Keamanan & Profil</span>
+              </Link>
+
+              {isSuperAdmin && (
+                <Link
+                  to="/admin/settings/logs"
+                  className={`flex items-center space-x-2.5 px-3 py-2.5 rounded-md transition-all duration-200 ${
+                    pathname === "/admin/settings/logs"
+                      ? "bg-white/10 text-white"
+                      : "text-slate-400 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  <Activity size={16} />
+                  <span className="text-xs font-medium">Riwayat Aktivitas</span>
+                </Link>
+              )}
+
+            </div>
+          </div>
+        </div>
       </nav>
 
       {/* Logout Button */}

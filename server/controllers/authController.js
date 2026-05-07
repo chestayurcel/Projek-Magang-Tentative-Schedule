@@ -82,7 +82,7 @@ async function login(req, res) {
  * Pendaftaran pegawai baru (role: USER, status: PENDING)
  */
 async function register(req, res) {
-  const { nipp, name, email, password, unit_id, role } = req.body;
+  const { nipp, name, email, password, unit_id, role, jabatan } = req.body;
 
   if (!nipp || !name || !email || !password) {
     return res.status(400).json({ error: 'NIPP, Nama, Email, dan Password wajib diisi.' });
@@ -120,6 +120,7 @@ async function register(req, res) {
         email,
         password: hashedPassword,
         role: assignedRole,
+        jabatan: jabatan || null,
         account_status: 'PENDING',
         ...(unit_id ? { unit_id: parseInt(unit_id) } : {}),
       },
