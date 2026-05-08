@@ -8,6 +8,7 @@ interface User {
   name: string;
   email: string;
   role: string;
+  jabatan?: string | null;
   account_status: string;
   unit_id: number | null;
   unit?: { id: number; unit_name: string } | null;

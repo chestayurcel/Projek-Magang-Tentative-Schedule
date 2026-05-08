@@ -11,7 +11,7 @@ export default function DashboardLayout() {
       <main className="flex-1 ml-64 flex flex-col">
         {/* Topbar */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shadow-sm">
-           <h2 className="text-xl font-semibold text-kai-blue tracking-tight">Dasbor Jadwal</h2>
+           <h2 className="text-xl font-semibold text-kai-blue tracking-tight">Dashboard Jadwal</h2>
            <div className="flex items-center space-x-4">
              <div className="text-right mr-2">
                <p className="text-sm font-medium text-slate-800">{user?.name}</p>

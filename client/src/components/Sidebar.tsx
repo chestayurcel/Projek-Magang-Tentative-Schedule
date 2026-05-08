@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Calendar, Users, Building, Settings, LogOut, ChevronDown, ChevronRight, Shield, Activity, ClipboardCheck } from "lucide-react";
+import { Calendar, Users, Building, Settings, LogOut, ChevronDown, ChevronRight, Shield, Activity, ClipboardCheck, FileText } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useState, useEffect } from "react";
 
@@ -77,13 +77,25 @@ export default function Sidebar() {
             <Link
               to="/admin/units"
               className={`flex items-center space-x-3 px-4 py-3.5 rounded-lg transition-all duration-200 ${
-                pathname === "/admin/units" 
-                  ? "bg-[#ff7900] text-white shadow-md shadow-[#ff7900]/20" 
+                pathname === "/admin/units"
+                  ? "bg-[#ff7900] text-white shadow-md shadow-[#ff7900]/20"
                   : "hover:bg-white/5 text-slate-300 hover:text-white"
               }`}
             >
               <Building size={20} className={pathname === "/admin/units" ? "opacity-100" : "opacity-70"} />
               <span className="font-medium tracking-wide text-sm">Manajemen Unit</span>
+            </Link>
+
+            <Link
+              to="/admin/recap"
+              className={`flex items-center space-x-3 px-4 py-3.5 rounded-lg transition-all duration-200 ${
+                pathname === "/admin/recap"
+                  ? "bg-[#ff7900] text-white shadow-md shadow-[#ff7900]/20"
+                  : "hover:bg-white/5 text-slate-300 hover:text-white"
+              }`}
+            >
+              <FileText size={20} className={pathname === "/admin/recap" ? "opacity-100" : "opacity-70"} />
+              <span className="font-medium tracking-wide text-sm">Rekapitulasi Jadwal</span>
             </Link>
           </>
         )}

@@ -123,7 +123,7 @@ async function createSchedule(req, res) {
   }
 }
 
-module.exports = { getSchedules, createSchedule, getPendingSchedules, approveSchedule, rejectSchedule, getIncomingSchedules, respondSchedule };
+module.exports = { getSchedules, createSchedule, getPendingSchedules, approveSchedule, rejectSchedule, getIncomingSchedules, respondSchedule, getRecapData };
 
 /**
  * GET /api/schedules/pending
@@ -271,5 +271,136 @@ async function respondSchedule(req, res) {
   } catch (error) {
     console.error('respondSchedule error:', error);
     return res.status(500).json({ error: 'Gagal merespons undangan jadwal.' });
+  }
+}
+
+/**
+ * GET /api/schedules/recap?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&scope=mine|unit
+ * Mengambil jadwal APPROVED dalam rentang tanggal, dikelompokkan per tanggal.
+ * Akses dibatasi role manajemen (SUPER_ADMIN, MANAJER, ASISTEN_MANAJER).
+ *
+ * Query params:
+ *  - startDate (required, format YYYY-MM-DD)
+ *  - endDate   (required, format YYYY-MM-DD)
+ *  - scope    (optional, default 'mine'):
+ *      'mine' → jadwal milik user yang sedang login
+ *      'unit' → jadwal seluruh anggota unit user
+ */
+async function getRecapData(req, res) {
+  const userId = req.user.id;
+  const { startDate, endDate, scope = 'mine' } = req.query;
+
+  if (!startDate || !endDate) {
+    return res.status(400).json({ error: 'Parameter startDate dan endDate wajib diisi.' });
+  }
+
+  // Validasi format YYYY-MM-DD
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
+    return res.status(400).json({ error: 'Format tanggal harus YYYY-MM-DD.' });
+  }
+
+  try {
+    // Range: dari awal hari startDate sampai akhir hari endDate
+    const rangeStart = new Date(`${startDate}T00:00:00`);
+    const rangeEnd = new Date(`${endDate}T23:59:59`);
+
+    if (rangeStart > rangeEnd) {
+      return res.status(400).json({ error: 'startDate tidak boleh setelah endDate.' });
+    }
+
+    // Ambil profil user yang login (untuk metadata laporan & filter scope)
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { unit: { select: { id: true, unit_name: true } } },
+    });
+
+    // Tentukan filter user_id berdasarkan scope
+    let userFilter;
+    if (scope === 'unit' && currentUser?.unit_id) {
+      userFilter = { user: { unit_id: currentUser.unit_id } };
+    } else {
+      userFilter = { user_id: userId };
+    }
+
+    const schedules = await prisma.schedule.findMany({
+      where: {
+        status: 'APPROVED',
+        start_time: { gte: rangeStart, lte: rangeEnd },
+        ...userFilter,
+      },
+      include: {
+        user: {
+          select: {
+            id: true, name: true, nipp: true, jabatan: true,
+            unit: { select: { id: true, unit_name: true } },
+          },
+        },
+        target_user: { select: { id: true, name: true, nipp: true, jabatan: true } },
+        guest: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { start_time: 'asc' },
+    });
+
+    // Helper: Format label tanggal Indonesia, mis. "Senin, 15 Mei 2026"
+    const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    const formatDateLabel = (d) => {
+      return `${dayNames[d.getDay()]}, ${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+    };
+    const pad = (n) => String(n).padStart(2, '0');
+    const toDateKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const toTimeStr = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+    // Kelompokkan berdasarkan tanggal mulai
+    const grouped = new Map();
+    for (const s of schedules) {
+      const startDt = new Date(s.start_time);
+      const endDt = new Date(s.end_time);
+      const key = toDateKey(startDt);
+
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          date: key,
+          dateLabel: formatDateLabel(startDt),
+          schedules: [],
+        });
+      }
+
+      grouped.get(key).schedules.push({
+        id: s.id,
+        type: s.type,
+        category: s.category,
+        notes: s.notes,
+        start_time: s.start_time,
+        end_time: s.end_time,
+        time_range: `${toTimeStr(startDt)} - ${toTimeStr(endDt)}`,
+        user: s.user,
+        target_user: s.target_user,
+        guest: s.guest,
+      });
+    }
+
+    // Convert Map ke array sorted by date
+    const groups = Array.from(grouped.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+    return res.status(200).json({
+      period: { startDate, endDate },
+      scope,
+      total: schedules.length,
+      reporter: currentUser ? {
+        id: currentUser.id,
+        name: currentUser.name,
+        nipp: currentUser.nipp,
+        jabatan: currentUser.jabatan,
+        role: currentUser.role,
+        unit: currentUser.unit,
+      } : null,
+      groups,
+    });
+  } catch (error) {
+    console.error('getRecapData error:', error);
+    return res.status(500).json({ error: 'Gagal mengambil data rekapitulasi jadwal.' });
   }
 }

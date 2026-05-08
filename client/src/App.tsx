@@ -9,6 +9,7 @@ import DashboardLayout from "./components/DashboardLayout";
 import AdminUsersPage from "./pages/AdminUsersPage";
 import AdminUnitsPage from "./pages/AdminUnitsPage";
 import ProfilePage from "./pages/ProfilePage";
+import RecapSchedules from "./pages/RecapSchedules";
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
           <Route path="/admin/schedules" element={<AdminSchedulesPage />} />
           <Route path="/admin/users" element={<AdminUsersPage />} />
           <Route path="/admin/units" element={<AdminUnitsPage />} />
+          <Route path="/admin/recap" element={<RecapSchedules />} />
           <Route path="/admin/settings/profile" element={<ProfilePage />} />
           <Route path="/admin/settings/logs" element={<div className="text-slate-500 text-center py-16">🚧 Halaman Riwayat Aktivitas dalam pengembangan.</div>} />
         </Route>

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
-const { getSchedules, createSchedule, getPendingSchedules, approveSchedule, rejectSchedule, getIncomingSchedules, respondSchedule } = require('../controllers/scheduleController');
+const { getSchedules, createSchedule, getPendingSchedules, approveSchedule, rejectSchedule, getIncomingSchedules, respondSchedule, getRecapData } = require('../controllers/scheduleController');
 
 // GET /api/schedules?view=GLOBAL|MY
 router.get('/', verifyToken, getSchedules);
@@ -11,6 +11,9 @@ router.get('/pending', verifyToken, verifyRole('SUPER_ADMIN', 'MANAJER', 'ASISTE
 
 // GET /api/schedules/incoming (Undangan jadwal untuk user yang login)
 router.get('/incoming', verifyToken, getIncomingSchedules);
+
+// GET /api/schedules/recap (Rekapitulasi jadwal untuk role manajemen)
+router.get('/recap', verifyToken, verifyRole('SUPER_ADMIN', 'MANAJER', 'ASISTEN_MANAJER'), getRecapData);
 
 // POST /api/schedules
 router.post('/', verifyToken, createSchedule);
