@@ -199,7 +199,6 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         {/* Legenda Warna */}
         <div className="flex flex-wrap items-center gap-4 mb-5 pb-4 border-b border-slate-100">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Legenda:</span>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-full bg-[#3b82f6]"></span>
             <span className="text-xs text-slate-600">Bersama</span>
