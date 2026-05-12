@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { X, Plus, User, Users, Briefcase } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { X, Plus, User, Users, Briefcase, Search } from "lucide-react";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -9,14 +9,39 @@ interface ModalProps {
   onSuccess: () => void;
 }
 
+// Bobot hierarki role — semakin tinggi angka, semakin senior posisinya.
+// Dipakai untuk membatasi delegasi: user hanya boleh mendelegasi ke atasan
+// (bobot >= bobot dirinya sendiri).
+const roleWeight: Record<string, number> = {
+  SUPER_ADMIN: 5,
+  MANAJER: 4,
+  ASISTEN_MANAJER: 3,
+  SUPERVISOR: 2,
+  STAFF: 1,
+};
+
+// Format role enum menjadi label yang mudah dibaca (Title Case)
+const formatRole = (role: string): string => {
+  const labels: Record<string, string> = {
+    SUPER_ADMIN: "Super Admin",
+    MANAJER: "Manajer",
+    ASISTEN_MANAJER: "Asisten Manajer",
+    SUPERVISOR: "Supervisor",
+    STAFF: "Staff",
+  };
+  return labels[role] || role.replace(/_/g, " ");
+};
+
 export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: ModalProps) {
   const { user } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [error, setError] = useState("");
-  
-  // New state for Action Type
+
+  // Action Type & multi-select state utk group meeting
   const [actionType, setActionType] = useState<'SELF' | 'MEETING' | 'DELEGATION'>('SELF');
+  const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
+  const [meetingSearch, setMeetingSearch] = useState("");
 
   const isAdmin = user?.role === "SUPER_ADMIN" || user?.role === "MANAJER" || user?.role === "ASISTEN_MANAJER";
 
@@ -27,15 +52,67 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
         .catch(console.error);
       setError("");
       setActionType('SELF'); // Reset
+      setSelectedUserIds([]);
+      setMeetingSearch("");
     }
   }, [isOpen, user?.id]);
 
-  if (!isOpen) return null;
+  // Reset pilihan multi-select kalau pindah action type
+  useEffect(() => {
+    setSelectedUserIds([]);
+    setMeetingSearch("");
+  }, [actionType]);
 
   // Filter users based on actionType
-  const targetUsers = actionType === 'DELEGATION' 
-    ? allUsers.filter(u => u.role === 'MANAJER' || u.role === 'ASISTEN_MANAJER')
+  // PENTING: dihitung SEBELUM early-return supaya hook order stabil
+  //
+  // DELEGATION: terapkan hierarchy weight — user hanya boleh delegasi ke
+  // pegawai yang bobotnya >= bobot dirinya sendiri (atasan atau setara).
+  // `allUsers` sudah otomatis exclude diri sendiri saat fetch.
+  const currentUserWeight = roleWeight[user?.role || ""] ?? 0;
+
+  const targetUsers = actionType === 'DELEGATION'
+    ? allUsers.filter((u: any) => (roleWeight[u.role] ?? 0) >= currentUserWeight)
     : allUsers;
+
+  // Daftar utk checkbox list MEETING dengan filter pencarian
+  // PENTING: useMemo HARUS dipanggil sebelum early-return agar urutan hook konsisten
+  const filteredMeetingUsers = useMemo(() => {
+    const q = meetingSearch.trim().toLowerCase();
+    if (!q) return targetUsers;
+    return targetUsers.filter((u: any) =>
+      u.name?.toLowerCase().includes(q) ||
+      u.nipp?.toLowerCase().includes(q) ||
+      u.role?.toLowerCase().includes(q)
+    );
+  }, [targetUsers, meetingSearch]);
+
+  // Early-return ditempatkan SETELAH semua hooks
+  if (!isOpen) return null;
+
+  const toggleParticipant = (id: number) => {
+    setSelectedUserIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  // ===== Mass-invite helpers =====
+  // Pilih HANYA user dengan role persis 'MANAJER' (tidak termasuk ASISTEN_MANAJER)
+  const selectAllManagers = () => {
+    const managerIds = allUsers
+      .filter((u: any) => u.role === 'MANAJER')
+      .map((u: any) => u.id);
+    setSelectedUserIds(managerIds);
+  };
+
+  // Pilih semua pegawai aktif (sudah otomatis exclude diri sendiri saat fetch)
+  const selectAllEmployees = () => {
+    setSelectedUserIds(allUsers.map((u: any) => u.id));
+  };
+
+  const clearSelection = () => {
+    setSelectedUserIds([]);
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -50,13 +127,27 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
     const endDate = form.get("end_date") as string;
     const endTime = form.get("end_time") as string;
 
-    if (startTime < "08:00" || startTime > "16:00" || endTime < "08:00" || endTime > "16:00") {
-      setError("Penambahan jadwal hanya dapat dilakukan pada jam kerja (08:00 - 16:00)");
-      setIsSubmitting(false);
-      return;
+    // Jam kerja kantor: 08:00 - 17:00. Jadwal di luar jam kerja diperbolehkan
+    // dengan konfirmasi eksplisit dari user.
+    const WORK_START = "08:00";
+    const WORK_END = "17:00";
+    const isOutsideWorkHours =
+      startTime < WORK_START || startTime > WORK_END ||
+      endTime < WORK_START || endTime > WORK_END;
+
+    if (isOutsideWorkHours) {
+      const proceed = window.confirm(
+        `⚠️ Jadwal yang Anda buat berada di luar jam kerja kantor (${WORK_START} - ${WORK_END}).\n\n` +
+        `Waktu jadwal: ${startTime} - ${endTime}\n\n` +
+        `Apakah Anda yakin ingin tetap menambahkan jadwal ini?`
+      );
+      if (!proceed) {
+        setIsSubmitting(false);
+        return;
+      }
     }
 
-    const payload = {
+    const payload: any = {
       actionType,
       notes: form.get("notes") as string,
       start_date: startDate,
@@ -64,14 +155,27 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
       end_date: endDate,
       end_time: endTime,
       category: category,
-      target_user_id: actionType !== 'SELF' ? (form.get("target_user_id") || null) : null,
     };
 
-    if (actionType !== 'SELF' && !payload.target_user_id) {
-      setError("Silakan pilih target pegawai / atasan.");
-      setIsSubmitting(false);
-      return;
+    if (actionType === 'MEETING') {
+      // Group meeting: multi-select participants
+      if (selectedUserIds.length === 0) {
+        setError("Silakan pilih minimal 1 pegawai untuk diundang.");
+        setIsSubmitting(false);
+        return;
+      }
+      payload.targetUserIds = selectedUserIds;
+    } else if (actionType === 'DELEGATION') {
+      // Delegasi: tetap single-select dari form (target_user_id)
+      const tid = form.get("target_user_id");
+      if (!tid) {
+        setError("Silakan pilih atasan tujuan delegasi.");
+        setIsSubmitting(false);
+        return;
+      }
+      payload.target_user_id = tid;
     }
+    // SELF: tidak perlu target
 
     try {
       await api.post("/schedules", payload);
@@ -115,13 +219,13 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
               <label className={`cursor-pointer flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${actionType === 'MEETING' ? 'border-amber-500 bg-amber-50/50' : 'border-slate-200 hover:border-slate-300'}`}>
                 <input type="radio" name="actionType" value="MEETING" className="sr-only" checked={actionType === 'MEETING'} onChange={() => setActionType('MEETING')} />
                 <Users size={24} className={`mb-1.5 ${actionType === 'MEETING' ? 'text-amber-500' : 'text-slate-400'}`} />
-                <span className={`text-xs font-semibold text-center ${actionType === 'MEETING' ? 'text-amber-600' : 'text-slate-600'}`}>Undang Pegawai Lain (Meeting)</span>
+                <span className={`text-xs font-semibold text-center ${actionType === 'MEETING' ? 'text-amber-600' : 'text-slate-600'}`}>Undang Pegawai Lain</span>
               </label>
 
               <label className={`cursor-pointer flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${actionType === 'DELEGATION' ? 'border-purple-500 bg-purple-50/50' : 'border-slate-200 hover:border-slate-300'}`}>
                 <input type="radio" name="actionType" value="DELEGATION" className="sr-only" checked={actionType === 'DELEGATION'} onChange={() => setActionType('DELEGATION')} />
                 <Briefcase size={24} className={`mb-1.5 ${actionType === 'DELEGATION' ? 'text-purple-500' : 'text-slate-400'}`} />
-                <span className={`text-xs font-semibold text-center ${actionType === 'DELEGATION' ? 'text-purple-600' : 'text-slate-600'}`}>Buatkan Jadwal Atasan (Delegasi)</span>
+                <span className={`text-xs font-semibold text-center ${actionType === 'DELEGATION' ? 'text-purple-600' : 'text-slate-600'}`}>Buatkan Jadwal Atasan</span>
               </label>
             </div>
           </div>
@@ -130,19 +234,135 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
 
           {/* Form Utama */}
           <div className="space-y-4">
-            {actionType !== 'SELF' && (
+            {/* DELEGATION → single select (1 atasan, hanya hierarki >= dirinya) */}
+            {actionType === 'DELEGATION' && (
               <div className="space-y-1 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                <label className="text-sm font-bold text-slate-800">
-                  {actionType === 'MEETING' ? 'Pilih Rekan Pegawai' : 'Pilih Atasan'}
-                </label>
+                <label className="text-sm font-bold text-slate-800">Pilih Atasan</label>
                 <select name="target_user_id" required className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none bg-white transition">
-                  <option value="">-- Pilih Pegawai --</option>
-                  {targetUsers.map(u => (
-                    <option key={u.id} value={u.id}>{u.name} ({u.role.replace("_", " ")})</option>
-                  ))}
+                  <option value="">-- Pilih Atasan --</option>
+                  {targetUsers.length === 0 ? (
+                    <option value="" disabled>Tidak ada atasan yang dapat didelegasikan.</option>
+                  ) : (
+                    targetUsers.map((u: any) => (
+                      <option key={u.id} value={u.id}>{u.name} - {formatRole(u.role)}</option>
+                    ))
+                  )}
                 </select>
                 <p className="text-xs text-slate-500 mt-1">
                   *Jadwal ini akan masuk berstatus <strong className="text-amber-600">PENDING</strong> dan memerlukan persetujuan dari yang bersangkutan.
+                </p>
+              </div>
+            )}
+
+            {/* MEETING → multi-select checkbox list (group meeting) */}
+            {actionType === 'MEETING' && (
+              <div className="space-y-2 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-bold text-slate-800">Undang Pegawai (Bisa Lebih dari 1)</label>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${selectedUserIds.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-500'}`}>
+                    {selectedUserIds.length} terpilih
+                  </span>
+                </div>
+
+                {/* Mass-invite quick pills */}
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={selectAllManagers}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded-full bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 transition"
+                  >
+                    Pilih Semua Manajer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={selectAllEmployees}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded-full bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 transition"
+                  >
+                    Pilih Semua Pegawai
+                  </button>
+                  {selectedUserIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearSelection}
+                      className="px-2.5 py-1 text-[11px] font-medium rounded-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 transition"
+                    >
+                      Bersihkan Pilihan
+                    </button>
+                  )}
+                </div>
+
+                {/* Search */}
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={meetingSearch}
+                    onChange={(e) => setMeetingSearch(e.target.value)}
+                    placeholder="Cari nama, NIPP, atau jabatan…"
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none bg-white transition"
+                  />
+                </div>
+
+                {/* Checkbox list */}
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+                  {filteredMeetingUsers.length === 0 ? (
+                    <div className="p-3 text-xs text-slate-400 text-center italic">
+                      {meetingSearch ? "Tidak ada pegawai yang cocok." : "Tidak ada pegawai aktif."}
+                    </div>
+                  ) : (
+                    filteredMeetingUsers.map((u: any) => {
+                      const checked = selectedUserIds.includes(u.id);
+                      return (
+                        <label
+                          key={u.id}
+                          className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-slate-50 transition ${checked ? 'bg-amber-50/50' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleParticipant(u.id)}
+                            className="w-4 h-4 rounded border-slate-300 text-kai-orange focus:ring-kai-orange"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-800 truncate">{u.name}</p>
+                            <p className="text-xs text-slate-500 truncate">
+                              {u.nipp} · {u.role?.replace("_", " ")}
+                            </p>
+                          </div>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Selected chips */}
+                {selectedUserIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {selectedUserIds.map((id) => {
+                      const u = allUsers.find((x) => x.id === id);
+                      if (!u) return null;
+                      return (
+                        <span
+                          key={id}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-medium"
+                        >
+                          {u.name}
+                          <button
+                            type="button"
+                            onClick={() => toggleParticipant(id)}
+                            className="hover:bg-amber-200 rounded-full p-0.5 transition"
+                            aria-label={`Hapus ${u.name}`}
+                          >
+                            <X size={10} />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <p className="text-xs text-slate-500">
+                  *Setiap pegawai akan menerima undangan dengan status <strong className="text-amber-600">PENDING</strong> dan dapat menerima/menolak secara independen.
                 </p>
               </div>
             )}
@@ -155,12 +375,12 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
             <div className="space-y-1">
                <label className="text-sm font-medium text-slate-700">Jenis Jadwal</label>
                <select name="category" className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none bg-white transition">
-                  <option value="PRIBADI">Pribadi (Hanya terlihat di kalender pribadi)</option>
-                  <option value="UNIT">Unit (Dilihat oleh rekan se-Unit)</option>
+                  <option value="PRIBADI">Pribadi</option>
+                  <option value="UNIT">Unit</option>
                   <option value="BERSAMA">
                     {isAdmin 
-                      ? "Bersama (Dilihat semua orang - Disetujui Otomatis)" 
-                      : "Bersama (Dilihat semua orang - Butuh Persetujuan Umum)"}
+                      ? "Bersama"
+                      : "Bersama (Butuh Persetujuan Atasan)"}
                   </option>
                </select>
             </div>
@@ -183,6 +403,9 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
                 <input required name="end_time" type="time" className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none transition" />
               </div>
             </div>
+            <p className="text-xs text-slate-500">
+              Jam kerja kantor: <span className="font-semibold text-slate-700">08:00 - 17:00</span>. Jadwal di luar jam kerja boleh, namun akan diminta konfirmasi terlebih dahulu.
+            </p>
           </div>
 
           <div className="flex justify-end pt-5 space-x-3 border-t border-slate-100">

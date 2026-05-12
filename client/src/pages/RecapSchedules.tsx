@@ -113,7 +113,9 @@ export default function RecapSchedules() {
     const periodLabel = formatPeriodLabel(recap.period.startDate, recap.period.endDate);
 
     let out = "";
-    out += "Yth. Bpk Kadaop 6 Yk, Bpk Deputy 6 Yk.\n";
+    out += "Yth.\n";
+    out += "Bpk Kadaop 6 Yk\n";
+    out += "Bpk Deputy 6 Yk\n";
     out += `Berikut kami sampaikan Tentative Schedule ${reporterJabatan} ${reporterUnit}\n`;
     out += `Periode: ${periodLabel}\n\n`;
 
@@ -225,8 +227,12 @@ export default function RecapSchedules() {
       let cursorY = margin + 48;
       doc.setTextColor(30, 41, 59);
       doc.setFontSize(10);
-      doc.text("Yth. Bpk Kadaop 6 Yk, Bpk Deputy 6 Yk.", margin, cursorY);
+      doc.text("Yth.", margin, cursorY);
       cursorY += 5;
+      doc.text("Bpk Kadaop 6 Yk", margin, cursorY);
+      cursorY += 5;
+      doc.text("Bpk Deputy 6 Yk", margin, cursorY);
+      cursorY += 7;
       doc.text("Berikut kami sampaikan rincian jadwal kegiatan sebagai berikut:", margin, cursorY);
       cursorY += 6;
 

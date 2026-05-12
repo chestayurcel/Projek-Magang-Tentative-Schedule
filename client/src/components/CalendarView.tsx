@@ -3,8 +3,16 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import { X, Calendar, Clock, User, Tag, CheckCircle2, AlertCircle } from "lucide-react";
+import { X, Calendar, Clock, User, Tag, CheckCircle2, AlertCircle, Users } from "lucide-react";
 import api from "../lib/api";
+
+interface ParticipantInfo {
+  id: number;
+  name: string;
+  nipp?: string;
+  role?: string;
+  status: string;
+}
 
 interface CalendarEvent {
   id: string;
@@ -22,6 +30,7 @@ interface CalendarEvent {
     creatorName: string | null;
     guestName: string | null;
     unitName: string | null;
+    participants: ParticipantInfo[];
   };
 }
 
@@ -128,6 +137,17 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
       title = schedule.notes || `Jadwal ${schedule.user.name}`;
     }
 
+    // Map participants (jika ada) ke struktur ringkas yg dipakai modal detail
+    const participants: ParticipantInfo[] = Array.isArray(schedule.participants)
+      ? schedule.participants.map((p: any) => ({
+          id: p.user?.id ?? p.userId,
+          name: p.user?.name ?? "—",
+          nipp: p.user?.nipp,
+          role: p.user?.role,
+          status: p.status,
+        }))
+      : [];
+
     return {
       id: String(schedule.id),
       title,
@@ -144,6 +164,7 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
         creatorName: schedule.user?.name || null,
         guestName: schedule.guest?.name || null,
         unitName: schedule.user?.unit?.unit_name || null,
+        participants,
       },
     };
   };
@@ -364,6 +385,55 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
                   </div>
                 </div>
               )}
+
+              {/* Peserta (Group Meeting) */}
+              {Array.isArray(selectedEvent.extendedProps.participants) &&
+                selectedEvent.extendedProps.participants.length > 0 && (
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 p-2 rounded-lg bg-blue-50">
+                      <Users size={16} className="text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                        Peserta ({selectedEvent.extendedProps.participants.length})
+                      </p>
+                      <ul className="mt-1.5 space-y-1">
+                        {selectedEvent.extendedProps.participants.map((p: ParticipantInfo) => {
+                          const statusStyle =
+                            p.status === "APPROVED"
+                              ? "bg-green-100 text-green-700"
+                              : p.status === "REJECTED"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-amber-100 text-amber-700";
+                          const statusLabel =
+                            p.status === "APPROVED"
+                              ? "Approved"
+                              : p.status === "REJECTED"
+                              ? "Rejected"
+                              : "Pending";
+                          return (
+                            <li
+                              key={p.id}
+                              className="flex items-center justify-between gap-2 text-sm"
+                            >
+                              <span className="text-slate-700 truncate">
+                                {p.name}
+                                {p.nipp && (
+                                  <span className="ml-1.5 text-xs text-slate-400">({p.nipp})</span>
+                                )}
+                              </span>
+                              <span
+                                className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusStyle}`}
+                              >
+                                {statusLabel}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  </div>
+                )}
 
               {/* Catatan */}
               {selectedEvent.extendedProps.notes && (

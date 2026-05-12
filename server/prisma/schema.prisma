@@ -56,6 +56,7 @@ model User {
   schedules        Schedule[]    @relation("UserSchedules")
   targetedSchedules Schedule[]   @relation("TargetUserSchedules")
   createdSchedules Schedule[]    @relation("CreatorSchedules")
+  participantOf    ScheduleParticipant[]
 
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -114,6 +115,24 @@ model Schedule {
   category       ScheduleCategory @default(PRIBADI)
   notes          String?          @db.Text
 
+  participants   ScheduleParticipant[]
+
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
+}
+
+model ScheduleParticipant {
+  id         Int            @id @default(autoincrement())
+  scheduleId Int
+  userId     Int
+  status     ScheduleStatus @default(PENDING)
+
+  schedule   Schedule       @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  user       User           @relation(fields: [userId], references: [id])
+
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@unique([scheduleId, userId])
+  @@index([userId])
 }

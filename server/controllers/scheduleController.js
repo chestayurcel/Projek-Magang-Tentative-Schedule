@@ -20,6 +20,8 @@ async function getSchedules(req, res) {
         { category: "BERSAMA", status: "APPROVED" },
         { user_id: userId },
         { target_user_id: userId, status: "APPROVED" },
+        // Group meeting: user diundang sebagai participant & sudah APPROVE
+        { participants: { some: { userId, status: "APPROVED" } } },
       ]
     };
 
@@ -37,6 +39,11 @@ async function getSchedules(req, res) {
         user: { select: { id: true, name: true, nipp: true, unit_id: true, unit: { select: { unit_name: true } } } },
         guest: { select: { id: true, name: true, email: true } },
         target_user: { select: { id: true, name: true } },
+        participants: {
+          include: {
+            user: { select: { id: true, name: true, nipp: true, role: true } },
+          },
+        },
       },
       orderBy: { start_time: 'asc' },
     });
@@ -55,25 +62,95 @@ async function getSchedules(req, res) {
 async function createSchedule(req, res) {
   const userId = req.user.id;
   const userRole = req.user.role;
-  const { start_date, start_time, end_date, end_time, notes, category, target_user_id, actionType } = req.body;
+  const { start_date, start_time, end_date, end_time, notes, category, target_user_id, targetUserIds, actionType } = req.body;
 
   if (!start_date || !start_time || !end_date || !end_time) {
     return res.status(400).json({ error: 'Tanggal dan waktu mulai serta selesai wajib diisi.' });
   }
 
-  // Validasi jam kerja (08:00 - 16:00)
-  if (start_time < '08:00' || start_time > '16:00' || end_time < '08:00' || end_time > '16:00') {
-    return res.status(400).json({ error: 'Penambahan jadwal hanya dapat dilakukan pada jam kerja (08:00 - 16:00)' });
-  }
+  // Catatan: Jam kerja kantor adalah 08:00 - 17:00. Jadwal di luar jam kerja
+  // diperbolehkan, tapi frontend akan meminta konfirmasi user terlebih dahulu.
 
   try {
     // Gabungkan tanggal dan jam menjadi format DateTime yang sesuai
     const combinedStartTime = new Date(`${start_date}T${start_time}:00`);
     const combinedEndTime = new Date(`${end_date}T${end_time}:00`);
 
+    // ====== CABANG GROUP MEETING (multi-undangan) ======
+    if (actionType === 'MEETING') {
+      // Normalisasi targetUserIds menjadi array number
+      let rawIds = [];
+      if (Array.isArray(targetUserIds)) rawIds = targetUserIds;
+      else if (targetUserIds) rawIds = [targetUserIds];
+      // Backward-compat: kalau frontend lama masih kirim target_user_id (single)
+      else if (target_user_id) rawIds = [target_user_id];
+
+      const inviteeIds = [...new Set(
+        rawIds
+          .map((v) => parseInt(v))
+          .filter((v) => Number.isFinite(v) && v !== userId) // hapus duplikat & self
+      )];
+
+      if (inviteeIds.length === 0) {
+        return res.status(400).json({ error: 'Pilih minimal 1 pegawai untuk diundang.' });
+      }
+
+      // Cek konflik untuk creator (jadwal sendiri)
+      const creatorConflict = await prisma.schedule.findFirst({
+        where: {
+          user_id: userId,
+          start_time: { lt: combinedEndTime },
+          end_time: { gt: combinedStartTime },
+        },
+      });
+      if (creatorConflict) {
+        return res.status(400).json({ error: 'Gagal: Anda sudah punya jadwal lain pada jam tersebut.' });
+      }
+
+      // Status jadwal utama: APPROVED utk creator (langsung muncul di kalender pribadinya)
+      const schedule = await prisma.schedule.create({
+        data: {
+          type: 'INTERNAL',
+          user_id: userId,
+          start_time: combinedStartTime,
+          end_time: combinedEndTime,
+          notes: notes || null,
+          category: category || 'PRIBADI',
+          status: 'APPROVED',
+          target_user_id: null,
+          created_by: null,
+        },
+      });
+
+      // Bulk insert participants (status PENDING utk masing-masing invitee)
+      await prisma.scheduleParticipant.createMany({
+        data: inviteeIds.map((uid) => ({
+          scheduleId: schedule.id,
+          userId: uid,
+          status: 'PENDING',
+        })),
+        skipDuplicates: true,
+      });
+
+      const withParticipants = await prisma.schedule.findUnique({
+        where: { id: schedule.id },
+        include: {
+          participants: {
+            include: { user: { select: { id: true, name: true, nipp: true, role: true } } },
+          },
+        },
+      });
+
+      return res.status(201).json({
+        message: `Undangan jadwal berhasil dikirim ke ${inviteeIds.length} pegawai.`,
+        schedule: withParticipants,
+      });
+    }
+
+    // ====== CABANG DELEGATION & SELF (logika lama, JANGAN diubah) ======
     // Pengecekan Bentrok (untuk pemilik jadwal akhir)
     const finalUserId = (actionType === 'DELEGATION' && target_user_id) ? parseInt(target_user_id) : userId;
-    
+
     const existingConflict = await prisma.schedule.findFirst({
       where: {
         user_id: finalUserId,
@@ -94,7 +171,8 @@ async function createSchedule(req, res) {
       finalTargetUserId = null;
       finalCreatedBy = userId;
       status = "PENDING";
-    } else if (actionType === 'MEETING' || (target_user_id && parseInt(target_user_id) !== userId)) {
+    } else if (target_user_id && parseInt(target_user_id) !== userId) {
+      // Single-target meeting lama (kompatibilitas)
       status = "PENDING";
     } else if (userRole === "SUPER_ADMIN" || userRole === "MANAJER" || userRole === "ASISTEN_MANAJER") {
       status = "APPROVED"; // Manajer ke atas langsung disetujui
@@ -190,29 +268,71 @@ async function rejectSchedule(req, res) {
 
 /**
  * GET /api/schedules/incoming
- * Mengambil jadwal yang ditargetkan ke user yang sedang login & berstatus PENDING
+ * Mengambil undangan jadwal PENDING untuk user yang sedang login.
+ * Menggabungkan tiga sumber:
+ *   - PARTICIPANT: user diundang ke group meeting via tabel ScheduleParticipant
+ *   - MEETING (lama, single-target): target_user_id pada Schedule
+ *   - DELEGATION: jadwal dititipkan ke kalender pribadi user oleh atasan
+ *
+ * Tiap item ditandai dengan field `kind` agar frontend tahu cara merespons.
  */
 async function getIncomingSchedules(req, res) {
   const userId = req.user.id;
 
   try {
-    const schedules = await prisma.schedule.findMany({
-      where: {
-        status: "PENDING",
-        OR: [
-          { target_user_id: userId }, // Meeting
-          { user_id: userId, created_by: { not: null } } // Delegasi
-        ]
-      },
+    // 1. Group-meeting invitations (tabel ScheduleParticipant)
+    const participantRows = await prisma.scheduleParticipant.findMany({
+      where: { userId, status: "PENDING" },
       include: {
-        user: { select: { id: true, name: true, nipp: true, role: true } },
-        target_user: { select: { id: true, name: true } },
-        creator: { select: { id: true, name: true, role: true } }
+        schedule: {
+          include: {
+            user: { select: { id: true, name: true, nipp: true, role: true } },
+            participants: {
+              include: { user: { select: { id: true, name: true } } },
+            },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    return res.status(200).json(schedules);
+    const participantItems = participantRows
+      .filter((p) => p.schedule) // safety
+      .map((p) => ({
+        ...p.schedule,
+        kind: 'PARTICIPANT',
+        participantId: p.id,
+        participantStatus: p.status,
+      }));
+
+    // 2. Legacy single-target meeting + Delegation (Schedule.target_user_id / created_by)
+    const scheduleRows = await prisma.schedule.findMany({
+      where: {
+        status: "PENDING",
+        OR: [
+          { target_user_id: userId }, // Meeting single-target (legacy)
+          { user_id: userId, created_by: { not: null } }, // Delegasi
+        ],
+      },
+      include: {
+        user: { select: { id: true, name: true, nipp: true, role: true } },
+        target_user: { select: { id: true, name: true } },
+        creator: { select: { id: true, name: true, role: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const scheduleItems = scheduleRows.map((s) => ({
+      ...s,
+      kind: s.created_by != null && s.user_id === userId ? 'DELEGATION' : 'MEETING',
+    }));
+
+    // Gabung & urutkan terbaru di depan
+    const combined = [...participantItems, ...scheduleItems].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    return res.status(200).json(combined);
   } catch (error) {
     console.error('getIncomingSchedules error:', error);
     return res.status(500).json({ error: 'Gagal mengambil undangan jadwal.' });
@@ -221,25 +341,75 @@ async function getIncomingSchedules(req, res) {
 
 /**
  * PATCH /api/schedules/:id/respond
- * User target menyetujui/menolak undangan jadwal
- * Body: { action: "approve" | "reject" }
+ * User menyetujui/menolak undangan jadwal.
+ * Body: { action: "approve" | "reject", kind?: "PARTICIPANT" | "MEETING" | "DELEGATION" }
+ *
+ * - PARTICIPANT (group meeting): update row ScheduleParticipant milik user
+ * - MEETING (single-target lama) atau DELEGATION: update Schedule.status (logika lama)
+ *
+ * Jika `kind` tidak dikirim, server auto-detect berdasarkan data yang ada.
  */
 async function respondSchedule(req, res) {
-  const { id } = req.params;
-  const { action } = req.body;
+  const scheduleId = parseInt(req.params.id);
+  const { action, kind } = req.body;
   const userId = req.user.id;
 
   if (!action || !['approve', 'reject'].includes(action)) {
     return res.status(400).json({ error: 'Aksi harus berupa "approve" atau "reject".' });
   }
 
+  const newStatus = action === 'approve' ? 'APPROVED' : 'REJECTED';
+  const msg = action === 'approve' ? 'disetujui' : 'ditolak';
+
   try {
-    // Cari jadwal dan pastikan user ini memang target-nya atau pemiliknya
+    // ==== Auto-detect kind kalau frontend tidak kirim ====
+    let resolvedKind = (kind || '').toUpperCase();
+    if (!['PARTICIPANT', 'MEETING', 'DELEGATION'].includes(resolvedKind)) {
+      const participantRow = await prisma.scheduleParticipant.findFirst({
+        where: { scheduleId, userId },
+      });
+      if (participantRow) {
+        resolvedKind = 'PARTICIPANT';
+      } else {
+        resolvedKind = 'MEETING'; // akan dicek lagi di bawah (MEETING & DELEGATION pakai jalur sama)
+      }
+    }
+
+    // ==== Cabang PARTICIPANT (group meeting baru) ====
+    if (resolvedKind === 'PARTICIPANT') {
+      const participant = await prisma.scheduleParticipant.findFirst({
+        where: { scheduleId, userId },
+        include: {
+          schedule: { include: { user: { select: { name: true } } } },
+        },
+      });
+
+      if (!participant) {
+        return res.status(403).json({ error: 'Anda tidak diundang ke jadwal ini.' });
+      }
+      if (participant.status !== 'PENDING') {
+        return res.status(400).json({ error: 'Anda sudah merespons undangan ini sebelumnya.' });
+      }
+
+      const updated = await prisma.scheduleParticipant.update({
+        where: { id: participant.id },
+        data: { status: newStatus },
+      });
+
+      const senderName = participant.schedule?.user?.name || 'Pengundang';
+      return res.status(200).json({
+        message: `Undangan jadwal dari ${senderName} berhasil ${msg}.`,
+        participant: updated,
+        kind: 'PARTICIPANT',
+      });
+    }
+
+    // ==== Cabang MEETING (single-target lama) & DELEGATION ====
     const schedule = await prisma.schedule.findUnique({
-      where: { id: parseInt(id) },
-      include: { 
+      where: { id: scheduleId },
+      include: {
         user: { select: { name: true } },
-        creator: { select: { name: true } }
+        creator: { select: { name: true } },
       },
     });
 
@@ -258,16 +428,17 @@ async function respondSchedule(req, res) {
       return res.status(400).json({ error: 'Jadwal ini sudah direspons sebelumnya.' });
     }
 
-    const newStatus = action === 'approve' ? 'APPROVED' : 'REJECTED';
-
     const updated = await prisma.schedule.update({
-      where: { id: parseInt(id) },
+      where: { id: scheduleId },
       data: { status: newStatus },
     });
 
-    const msg = action === 'approve' ? 'disetujui' : 'ditolak';
     const senderName = isOwnerDelegated ? schedule.creator?.name : schedule.user?.name;
-    return res.status(200).json({ message: `Jadwal dari ${senderName} berhasil ${msg}.`, schedule: updated });
+    return res.status(200).json({
+      message: `Jadwal dari ${senderName} berhasil ${msg}.`,
+      schedule: updated,
+      kind: isOwnerDelegated ? 'DELEGATION' : 'MEETING',
+    });
   } catch (error) {
     console.error('respondSchedule error:', error);
     return res.status(500).json({ error: 'Gagal merespons undangan jadwal.' });

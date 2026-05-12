@@ -27,11 +27,16 @@ export default function Sidebar() {
 
   return (
     <aside className="w-64 bg-[#0c1040] text-white flex flex-col h-screen fixed top-0 left-0 shadow-2xl z-50">
-      <div className="p-6 border-b border-white/10 bg-[#0a0d36]">
-        <h1 className="text-2xl font-black tracking-widest text-white">
-          KAI <span className="text-[#ff7900]">DAOP 6</span>
-        </h1>
-        <p className="text-xs text-slate-300 mt-1.5 opacity-70 tracking-widest uppercase">Sistem Jadwal</p>
+      <div className="p-5 border-b border-white/10 bg-[#0a0d36] flex items-center gap-3">
+        <img
+          src="/logo_kai_putih.png"
+          alt="Logo PT KAI"
+          className="h-10 w-auto shrink-0"
+        />
+        <div>
+          <p className="text-sm font-bold text-white tracking-wide leading-tight">DAOP 6 Yogyakarta</p>
+          <p className="text-[10px] text-slate-400 tracking-widest uppercase mt-0.5">Sistem Jadwal</p>
+        </div>
       </div>
 
       <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
