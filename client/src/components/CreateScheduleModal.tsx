@@ -42,6 +42,8 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
   const [actionType, setActionType] = useState<'SELF' | 'MEETING' | 'DELEGATION'>('SELF');
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
   const [meetingSearch, setMeetingSearch] = useState("");
+  // Kategori jadwal — controlled state agar bisa di-filter dinamis sesuai actionType
+  const [category, setCategory] = useState<'PRIBADI' | 'UNIT' | 'BERSAMA'>('PRIBADI');
 
   const isAdmin = user?.role === "SUPER_ADMIN" || user?.role === "MANAJER" || user?.role === "ASISTEN_MANAJER";
 
@@ -54,8 +56,17 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
       setActionType('SELF'); // Reset
       setSelectedUserIds([]);
       setMeetingSearch("");
+      setCategory('PRIBADI'); // Default category saat modal dibuka
     }
   }, [isOpen, user?.id]);
+
+  // Auto-reset kategori ke UNIT bila user pindah ke MEETING/DELEGATION
+  // sementara kategori sebelumnya masih PRIBADI (yang tidak relevan utk acara berkelompok)
+  useEffect(() => {
+    if (actionType !== 'SELF' && category === 'PRIBADI') {
+      setCategory('UNIT');
+    }
+  }, [actionType, category]);
 
   // Reset pilihan multi-select kalau pindah action type
   useEffect(() => {
@@ -374,15 +385,28 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
 
             <div className="space-y-1">
                <label className="text-sm font-medium text-slate-700">Jenis Jadwal</label>
-               <select name="category" className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none bg-white transition">
-                  <option value="PRIBADI">Pribadi</option>
+               <select
+                 name="category"
+                 value={category}
+                 onChange={(e) => setCategory(e.target.value as 'PRIBADI' | 'UNIT' | 'BERSAMA')}
+                 className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none bg-white transition"
+               >
+                  {/* PRIBADI hanya muncul saat jadwal untuk diri sendiri */}
+                  {actionType === 'SELF' && (
+                    <option value="PRIBADI">Pribadi</option>
+                  )}
                   <option value="UNIT">Unit</option>
                   <option value="BERSAMA">
-                    {isAdmin 
+                    {isAdmin
                       ? "Bersama"
                       : "Bersama (Butuh Persetujuan Atasan)"}
                   </option>
                </select>
+               {actionType !== 'SELF' && (
+                 <p className="text-xs text-slate-500 mt-1">
+                   *Jadwal yang melibatkan orang lain hanya bisa berkategori <strong>Unit</strong> atau <strong>Bersama</strong>.
+                 </p>
+               )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">

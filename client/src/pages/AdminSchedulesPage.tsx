@@ -1,21 +1,46 @@
 import { useState, useEffect } from "react";
-import { CheckCircle, XCircle, Clock, User, Calendar } from "lucide-react";
+import { CheckCircle, XCircle, Clock, User, Calendar, Mail, Users, Info } from "lucide-react";
 import api from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 
 export default function AdminSchedulesPage() {
-  const [schedules, setSchedules] = useState<any[]>([]);
+  const { user } = useAuth();
+  // Apakah user punya hak akses admin queue (`/schedules/pending`)
+  const isAdmin = user?.role === "SUPER_ADMIN" || user?.role === "MANAJER" || user?.role === "ASISTEN_MANAJER";
+
+  // Jadwal yang membutuhkan ADMIN approval (global queue, status PENDING)
+  const [adminPending, setAdminPending] = useState<any[]>([]);
+  // Undangan meeting (PARTICIPANT) yang menargetkan user yang sedang login
+  const [myInvites, setMyInvites] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [processing, setProcessing] = useState<number | null>(null);
+  // Composite key (kind + id) supaya admin queue & personal invite tidak bentrok
+  const [processing, setProcessing] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchPending();
-  }, []);
+    fetchAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
 
-  const fetchPending = async () => {
+  const fetchAll = async () => {
     setIsLoading(true);
     try {
-      const res = await api.get("/schedules/pending");
-      setSchedules(res.data);
+      // Selalu fetch incoming (semua role bisa)
+      const incomingPromise = api.get("/schedules/incoming");
+
+      // Fetch admin queue HANYA jika user adalah admin
+      // (endpoint /schedules/pending require role SUPER_ADMIN/MANAJER/ASISTEN_MANAJER,
+      //  jika dipanggil oleh staff/supervisor → 403 → interceptor auto-logout. Jangan!)
+      const pendingPromise = isAdmin
+        ? api.get("/schedules/pending")
+        : Promise.resolve({ data: [] });
+
+      const [pendingRes, incomingRes] = await Promise.all([pendingPromise, incomingPromise]);
+
+      setAdminPending(Array.isArray(pendingRes.data) ? pendingRes.data : []);
+      // Hanya tarik kind=PARTICIPANT (group meeting invite). MEETING legacy &
+      // DELEGATION sudah masuk ke /schedules/pending sehingga tidak perlu di-double.
+      const incoming = Array.isArray(incomingRes.data) ? incomingRes.data : [];
+      setMyInvites(incoming.filter((s: any) => s.kind === "PARTICIPANT"));
     } catch (err) {
       console.error(err);
     } finally {
@@ -23,12 +48,14 @@ export default function AdminSchedulesPage() {
     }
   };
 
-  const handleApprove = async (id: number) => {
+  // ===== Handler: Admin queue (PATCH /schedules/:id/approve|reject) =====
+  const handleAdminApprove = async (id: number) => {
     if (!confirm("Apakah Anda yakin ingin menyetujui jadwal ini?")) return;
-    setProcessing(id);
+    const key = `ADMIN-${id}`;
+    setProcessing(key);
     try {
       await api.patch(`/schedules/${id}/approve`);
-      setSchedules(prev => prev.filter(s => s.id !== id));
+      setAdminPending(prev => prev.filter(s => s.id !== id));
     } catch (err: any) {
       alert(err.response?.data?.error || "Gagal menyetujui.");
     } finally {
@@ -36,14 +63,33 @@ export default function AdminSchedulesPage() {
     }
   };
 
-  const handleReject = async (id: number) => {
+  const handleAdminReject = async (id: number) => {
     if (!confirm("Apakah Anda yakin ingin menolak jadwal ini?")) return;
-    setProcessing(id);
+    const key = `ADMIN-${id}`;
+    setProcessing(key);
     try {
       await api.patch(`/schedules/${id}/reject`);
-      setSchedules(prev => prev.filter(s => s.id !== id));
+      setAdminPending(prev => prev.filter(s => s.id !== id));
     } catch (err: any) {
       alert(err.response?.data?.error || "Gagal menolak.");
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  // ===== Handler: Personal invite (PATCH /schedules/:id/respond, kind=PARTICIPANT) =====
+  const handleInviteRespond = async (scheduleId: number, action: "approve" | "reject") => {
+    const label = action === "approve" ? "menerima" : "menolak";
+    if (!confirm(`Apakah Anda yakin ingin ${label} undangan jadwal ini?`)) return;
+
+    const key = `INVITE-${scheduleId}`;
+    setProcessing(key);
+    try {
+      const res = await api.patch(`/schedules/${scheduleId}/respond`, { action, kind: "PARTICIPANT" });
+      alert(res.data.message);
+      setMyInvites(prev => prev.filter(s => s.id !== scheduleId));
+    } catch (err: any) {
+      alert(err.response?.data?.error || "Gagal merespons.");
     } finally {
       setProcessing(null);
     }
@@ -65,95 +111,204 @@ export default function AdminSchedulesPage() {
     );
   }
 
+  const totalInbox = adminPending.length + myInvites.length;
+
   return (
     <div className="space-y-6">
       <div className="border-b border-slate-200 pb-5">
         <h1 className="text-3xl font-bold text-kai-blue tracking-tight">Persetujuan Jadwal</h1>
-        <p className="text-slate-500 mt-1">Kelola dan tinjau jadwal yang menunggu persetujuan dari pegawai.</p>
+        <p className="text-slate-500 mt-1">
+          {isAdmin
+            ? "Kelola undangan meeting Anda dan tinjau jadwal yang menunggu persetujuan admin."
+            : "Kelola undangan meeting yang ditujukan kepada Anda."}
+        </p>
       </div>
 
-      {schedules.length === 0 ? (
+      {totalInbox === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center">
           <CheckCircle size={56} className="mx-auto text-green-400 mb-4" />
           <h3 className="text-lg font-semibold text-slate-700">Semua Bersih!</h3>
-          <p className="text-slate-500 mt-1">Tidak ada jadwal yang menunggu persetujuan saat ini.</p>
+          <p className="text-slate-500 mt-1">
+            {isAdmin
+              ? "Tidak ada undangan maupun jadwal yang menunggu persetujuan saat ini."
+              : "Tidak ada undangan meeting yang menunggu respons Anda saat ini."}
+          </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-500 font-medium">
-              {schedules.length} jadwal menunggu persetujuan
-            </span>
-          </div>
-
-          {schedules.map((s) => (
-            <div key={s.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow">
-              <div className="p-5">
-                <div className="flex items-start justify-between">
-                  {/* Info Jadwal */}
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <h3 className="text-lg font-semibold text-slate-800 truncate">
-                      {s.notes || "Jadwal Tanpa Judul"}
-                    </h3>
-                    
-                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-500">
-                      <span className="flex items-center">
-                        <User size={14} className="mr-1.5 text-slate-400" />
-                        {s.user?.name || "—"} ({s.user?.nipp})
-                      </span>
-                      <span className="flex items-center">
-                        <Calendar size={14} className="mr-1.5 text-slate-400" />
-                        {formatDate(s.start_time)} — {formatDate(s.end_time)}
-                      </span>
-                      <span className="flex items-center">
-                        <Clock size={14} className="mr-1.5 text-slate-400" />
-                        Diajukan {formatDate(s.createdAt)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 pt-1">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-100">
-                        PENDING
-                      </span>
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        s.isGlobal 
-                          ? "bg-blue-50 text-blue-700 border border-blue-100" 
-                          : "bg-green-50 text-green-700 border border-green-100"
-                      }`}>
-                        {s.isGlobal ? "Keseluruhan" : "Pribadi"}
-                      </span>
-                      {s.type === "TAMU" && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
-                          Tamu: {s.guest?.name}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Tombol Aksi */}
-                  <div className="flex items-center space-x-2 ml-4 shrink-0">
-                    <button
-                      onClick={() => handleApprove(s.id)}
-                      disabled={processing === s.id}
-                      className="flex items-center px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition disabled:opacity-50 shadow-sm"
-                    >
-                      <CheckCircle size={16} className="mr-1.5" />
-                      Setujui
-                    </button>
-                    <button
-                      onClick={() => handleReject(s.id)}
-                      disabled={processing === s.id}
-                      className="flex items-center px-4 py-2 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition disabled:opacity-50"
-                    >
-                      <XCircle size={16} className="mr-1.5" />
-                      Tolak
-                    </button>
-                  </div>
-                </div>
+        <>
+          {/* ========== SECTION 1: UNDANGAN MEETING UNTUK ANDA ========== */}
+          {myInvites.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Mail size={18} className="text-amber-500" />
+                <h2 className="text-lg font-bold text-slate-800">
+                  Undangan Meeting Untuk Anda
+                  <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
+                    {myInvites.length}
+                  </span>
+                </h2>
               </div>
+              <p className="text-sm text-slate-500 -mt-1">
+                Anda diundang sebagai peserta. Terima atau tolak undangan secara independen.
+              </p>
+
+              {myInvites.map((s) => {
+                const key = `INVITE-${s.id}`;
+                const isProcessing = processing === key;
+                const senderName = s.user?.name || "—";
+                const participantCount = Array.isArray(s.participants) ? s.participants.length : 0;
+
+                return (
+                  <div key={`invite-${s.id}`} className="bg-white rounded-xl shadow-sm border border-amber-200 overflow-hidden hover:shadow-md transition-shadow">
+                    <div className="border-l-4 border-amber-400 p-5">
+                      <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <div className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border bg-blue-50 text-blue-700 border-blue-200">
+                            <Info size={14} className="mr-1.5" />
+                            {senderName} mengundang Anda ke meeting grup
+                          </div>
+
+                          <h3 className="text-lg font-semibold text-slate-800 truncate">
+                            {s.notes || "Jadwal Tanpa Judul"}
+                          </h3>
+
+                          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-500">
+                            <span className="flex items-center">
+                              <User size={14} className="mr-1.5 text-amber-500" />
+                              Dari: <strong className="ml-1 text-slate-700">{senderName}</strong>
+                            </span>
+                            <span className="flex items-center">
+                              <Calendar size={14} className="mr-1.5 text-slate-400" />
+                              {formatDate(s.start_time)} — {formatDate(s.end_time)}
+                            </span>
+                            {participantCount > 1 && (
+                              <span className="flex items-center">
+                                <Users size={14} className="mr-1.5 text-blue-500" />
+                                {participantCount} peserta diundang
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-2 shrink-0 self-start sm:self-center">
+                          <button
+                            onClick={() => handleInviteRespond(s.id, "approve")}
+                            disabled={isProcessing}
+                            className="flex items-center px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition disabled:opacity-50 shadow-sm"
+                          >
+                            <CheckCircle size={16} className="mr-1.5" />
+                            Terima
+                          </button>
+                          <button
+                            onClick={() => handleInviteRespond(s.id, "reject")}
+                            disabled={isProcessing}
+                            className="flex items-center px-4 py-2 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition disabled:opacity-50"
+                          >
+                            <XCircle size={16} className="mr-1.5" />
+                            Tolak
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
-        </div>
+          )}
+
+          {/* ========== SECTION 2: ADMIN QUEUE (Pending Schedule Approvals) ========== */}
+          {adminPending.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Clock size={18} className="text-kai-blue" />
+                <h2 className="text-lg font-bold text-slate-800">
+                  Menunggu Persetujuan Admin
+                  <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700">
+                    {adminPending.length}
+                  </span>
+                </h2>
+              </div>
+              <p className="text-sm text-slate-500 -mt-1">
+                Jadwal yang diajukan pegawai dan memerlukan persetujuan dari Anda sebagai admin.
+              </p>
+
+              {adminPending.map((s) => {
+                const key = `ADMIN-${s.id}`;
+                const isProcessing = processing === key;
+
+                return (
+                  <div key={`admin-${s.id}`} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow">
+                    <div className="p-5">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <h3 className="text-lg font-semibold text-slate-800 truncate">
+                            {s.notes || "Jadwal Tanpa Judul"}
+                          </h3>
+
+                          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-500">
+                            <span className="flex items-center">
+                              <User size={14} className="mr-1.5 text-slate-400" />
+                              {s.user?.name || "—"} ({s.user?.nipp})
+                            </span>
+                            <span className="flex items-center">
+                              <Calendar size={14} className="mr-1.5 text-slate-400" />
+                              {formatDate(s.start_time)} — {formatDate(s.end_time)}
+                            </span>
+                            <span className="flex items-center">
+                              <Clock size={14} className="mr-1.5 text-slate-400" />
+                              Diajukan {formatDate(s.createdAt)}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-1">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-100">
+                              PENDING
+                            </span>
+                            {s.category && (
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                                s.category === "BERSAMA"
+                                  ? "bg-blue-50 text-blue-700 border border-blue-100"
+                                  : s.category === "UNIT"
+                                  ? "bg-purple-50 text-purple-700 border border-purple-100"
+                                  : "bg-green-50 text-green-700 border border-green-100"
+                              }`}>
+                                {s.category}
+                              </span>
+                            )}
+                            {s.type === "TAMU" && (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
+                                Tamu: {s.guest?.name}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-2 ml-4 shrink-0">
+                          <button
+                            onClick={() => handleAdminApprove(s.id)}
+                            disabled={isProcessing}
+                            className="flex items-center px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition disabled:opacity-50 shadow-sm"
+                          >
+                            <CheckCircle size={16} className="mr-1.5" />
+                            Setujui
+                          </button>
+                          <button
+                            onClick={() => handleAdminReject(s.id)}
+                            disabled={isProcessing}
+                            className="flex items-center px-4 py-2 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition disabled:opacity-50"
+                          >
+                            <XCircle size={16} className="mr-1.5" />
+                            Tolak
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

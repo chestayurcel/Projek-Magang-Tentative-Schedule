@@ -44,8 +44,8 @@ export default function Sidebar() {
         <Link
           to="/dashboard"
           className={`flex items-center space-x-3 px-4 py-3.5 rounded-lg transition-all duration-200 ${
-            pathname === "/dashboard" 
-              ? "bg-[#ff7900] text-white shadow-md shadow-[#ff7900]/20" 
+            pathname === "/dashboard"
+              ? "bg-[#ff7900] text-white shadow-md shadow-[#ff7900]/20"
               : "hover:bg-white/5 text-slate-300 hover:text-white"
           }`}
         >
@@ -53,20 +53,22 @@ export default function Sidebar() {
           <span className="font-medium tracking-wide text-sm">Beranda Jadwal</span>
         </Link>
 
+        {/* Persetujuan Jadwal — diakses oleh SEMUA role (staff & supervisor utk
+            menerima/menolak undangan meeting, admin utk approve global queue). */}
+        <Link
+          to="/admin/schedules"
+          className={`flex items-center space-x-3 px-4 py-3.5 rounded-lg transition-all duration-200 ${
+            pathname === "/admin/schedules"
+              ? "bg-[#ff7900] text-white shadow-md shadow-[#ff7900]/20"
+              : "hover:bg-white/5 text-slate-300 hover:text-white"
+          }`}
+        >
+          <ClipboardCheck size={20} className={pathname === "/admin/schedules" ? "opacity-100" : "opacity-70"} />
+          <span className="font-medium tracking-wide text-sm">Persetujuan Jadwal</span>
+        </Link>
+
         {isAdmin && (
           <>
-            <Link
-              to="/admin/schedules"
-              className={`flex items-center space-x-3 px-4 py-3.5 rounded-lg transition-all duration-200 ${
-                pathname === "/admin/schedules" 
-                  ? "bg-[#ff7900] text-white shadow-md shadow-[#ff7900]/20" 
-                  : "hover:bg-white/5 text-slate-300 hover:text-white"
-              }`}
-            >
-              <ClipboardCheck size={20} className={pathname === "/admin/schedules" ? "opacity-100" : "opacity-70"} />
-              <span className="font-medium tracking-wide text-sm">Persetujuan Jadwal</span>
-            </Link>
-
             <Link
               to="/admin/users"
               className={`flex items-center space-x-3 px-4 py-3.5 rounded-lg transition-all duration-200 ${

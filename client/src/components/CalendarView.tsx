@@ -85,7 +85,12 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
       
       // Filter data di frontend berdasarkan tab
       if (currentView === "PRIBADI") {
-         data = data.filter((s: any) => s.user_id === userId || s.target_user_id === userId);
+         // "Jadwal Saya" = jadwal milik sendiri + target meeting single + peserta group meeting
+         data = data.filter((s: any) =>
+           s.user_id === userId
+           || s.target_user_id === userId
+           || (Array.isArray(s.participants) && s.participants.some((p: any) => (p.user?.id ?? p.userId) === userId))
+         );
       } else if (currentView === "UNIT") {
          data = data.filter((s: any) => s.category === "UNIT");
       } else if (currentView === "BERSAMA") {
@@ -105,6 +110,16 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
   const mapToCalendarEvent = (schedule: any): CalendarEvent => {
     const isGuest = schedule.type === "TAMU";
 
+    // Hitung status efektif: untuk group meeting (punya participants), tampilkan
+    // sebagai PENDING selama masih ada peserta yang belum merespons (status PENDING).
+    // Backend selalu set Schedule.status=APPROVED utk MEETING, tapi visual kalender
+    // harus mencerminkan apakah undangan sudah dikonfirmasi semua peserta.
+    let effectiveStatus = schedule.status;
+    if (Array.isArray(schedule.participants) && schedule.participants.length > 0) {
+      const hasPending = schedule.participants.some((p: any) => p.status === "PENDING");
+      if (hasPending) effectiveStatus = "PENDING";
+    }
+
     // Skema warna berdasarkan jenis
     let bg = "#3b82f6"; // Biru default (Jadwal Bersama)
     let border = "#2563eb";
@@ -120,11 +135,11 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
       border = "#059669";
     }
 
-    // Status non-APPROVED mendapat opacity lebih rendah
-    if (schedule.status === "PENDING") {
+    // Status non-APPROVED override warna kategori (pakai status efektif, bukan raw)
+    if (effectiveStatus === "PENDING") {
       bg = "#94a3b8";    // Abu-abu untuk Pending
       border = "#64748b";
-    } else if (schedule.status === "REJECTED") {
+    } else if (effectiveStatus === "REJECTED") {
       bg = "#ef4444";    // Merah untuk Ditolak
       border = "#dc2626";
     }
@@ -157,7 +172,7 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
       borderColor: border,
       textColor: "#ffffff",
       extendedProps: {
-        status: schedule.status,
+        status: effectiveStatus,
         type: schedule.type,
         category: schedule.category,
         notes: schedule.notes,
