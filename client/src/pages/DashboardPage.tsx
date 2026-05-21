@@ -7,7 +7,7 @@ import IncomingSchedules from "../components/IncomingSchedules";
 
 export default function DashboardPage() {
   const { user, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<"PRIBADI" | "UNIT" | "BERSAMA">("BERSAMA");
+  const [activeTab, setActiveTab] = useState<"PRIBADI" | "UNIT" | "BERSAMA" | "TIDAK_SESUAI">("BERSAMA");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -66,6 +66,17 @@ export default function DashboardPage() {
             }`}
           >
             Jadwal Bersama
+          </button>
+          <button
+            onClick={() => setActiveTab("TIDAK_SESUAI")}
+            className={`px-4 py-2 font-medium text-sm rounded-t-lg transition-colors duration-200 border-b-2 ${
+              activeTab === "TIDAK_SESUAI"
+                ? "border-red-500 text-red-600"
+                : "border-transparent text-slate-500 hover:text-red-600"
+            }`}
+            title="Monitoring jadwal yang dievaluasi 'Tidak Sesuai'"
+          >
+            Jadwal Tidak Sesuai
           </button>
         </div>
 

@@ -42,8 +42,18 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
   const [actionType, setActionType] = useState<'SELF' | 'MEETING' | 'DELEGATION'>('SELF');
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
   const [meetingSearch, setMeetingSearch] = useState("");
-  // Kategori jadwal — controlled state agar bisa di-filter dinamis sesuai actionType
+  // Kategori jadwal & Judul/Keperluan — controlled agar bisa di-prefill saat user pilih "Jadwalkan Ulang"
   const [category, setCategory] = useState<'PRIBADI' | 'UNIT' | 'BERSAMA'>('PRIBADI');
+  const [notes, setNotes] = useState("");
+
+  // Daftar jadwal lampau berstatus TIDAK_SESUAI milik user (untuk fitur reschedule)
+  const [tidakSesuaiList, setTidakSesuaiList] = useState<any[]>([]);
+  const [selectedRescheduleId, setSelectedRescheduleId] = useState<string>("");
+
+  // === Jadwal Berulang / Recurring ===
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState<'DAILY' | 'WEEKLY' | 'MONTHLY'>('WEEKLY');
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState("");
 
   const isAdmin = user?.role === "SUPER_ADMIN" || user?.role === "MANAJER" || user?.role === "ASISTEN_MANAJER";
 
@@ -52,13 +62,42 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
       api.get("/users/active")
         .then(res => setAllUsers(res.data.filter((u: any) => u.id !== user?.id))) // Exclude self
         .catch(console.error);
+
+      // Ambil daftar jadwal lampau "Tidak Sesuai" milik user
+      api.get("/schedules/tidak-sesuai")
+        .then(res => setTidakSesuaiList(Array.isArray(res.data) ? res.data : []))
+        .catch(() => setTidakSesuaiList([]));
+
       setError("");
       setActionType('SELF'); // Reset
       setSelectedUserIds([]);
       setMeetingSearch("");
-      setCategory('PRIBADI'); // Default category saat modal dibuka
+      setCategory('PRIBADI');
+      setNotes("");
+      setSelectedRescheduleId("");
+      setIsRecurring(false);
+      setRecurrenceFrequency('WEEKLY');
+      setRecurrenceEndDate("");
     }
   }, [isOpen, user?.id]);
+
+  // Handler dropdown "Jadwalkan Ulang" — auto-fill form berdasarkan jadwal lama
+  const handleRescheduleSelect = (id: string) => {
+    setSelectedRescheduleId(id);
+    if (!id) {
+      // User pilih "tidak, mulai dari kosong" → clear pre-fill
+      setNotes("");
+      setCategory('PRIBADI');
+      return;
+    }
+    const found = tidakSesuaiList.find((s: any) => String(s.id) === id);
+    if (found) {
+      setNotes(found.notes || "");
+      // Pastikan kategori valid (kalau PRIBADI tapi actionType bukan SELF, useEffect bawah akan reset ke UNIT)
+      const cat = (found.category as 'PRIBADI' | 'UNIT' | 'BERSAMA') || 'PRIBADI';
+      setCategory(cat);
+    }
+  };
 
   // Auto-reset kategori ke UNIT bila user pindah ke MEETING/DELEGATION
   // sementara kategori sebelumnya masih PRIBADI (yang tidak relevan utk acara berkelompok)
@@ -188,9 +227,36 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
     }
     // SELF: tidak perlu target
 
+    // Kalau user pilih "Jadwalkan Ulang dari jadwal Tidak Sesuai", kirim ID-nya
+    // supaya backend bisa menandai jadwal lama agar tidak muncul lagi di dropdown.
+    if (selectedRescheduleId) {
+      payload.rescheduleFromId = selectedRescheduleId;
+    }
+
+    // Recurring schedule fields
+    if (isRecurring) {
+      if (!recurrenceEndDate) {
+        setError("Silakan isi Tanggal Berakhir untuk jadwal berulang.");
+        setIsSubmitting(false);
+        return;
+      }
+      if (recurrenceEndDate < startDate) {
+        setError("Tanggal Berakhir jadwal berulang tidak boleh lebih awal dari Tanggal Mulai.");
+        setIsSubmitting(false);
+        return;
+      }
+      payload.isRecurring = true;
+      payload.frequency = recurrenceFrequency;
+      payload.recurrenceEndDate = recurrenceEndDate;
+    }
+
     try {
-      await api.post("/schedules", payload);
+      const res = await api.post("/schedules", payload);
       setIsSubmitting(false);
+      // Untuk recurring, tampilkan info berapa jadwal yang berhasil dibuat
+      if (isRecurring && res.data?.message) {
+        alert(res.data.message);
+      }
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -216,6 +282,46 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto">
           {error && <div className="p-3 bg-red-50 text-red-600 rounded-md border border-red-100 text-sm font-medium">{error}</div>}
+
+          {/* === Reschedule dari Jadwal "Tidak Sesuai" === */}
+          {tidakSesuaiList.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 space-y-2">
+              <label className="flex items-start gap-2 text-sm font-bold text-amber-800">
+                <Search size={14} className="text-amber-600 mt-0.5 shrink-0" />
+                <span>Jadwalkan Ulang dari Kegiatan yang Tidak Sesuai?</span>
+              </label>
+              <p className="text-[11px] text-amber-700/80 pl-6">
+                Pilih kegiatan lampau yang belum sempat terlaksana. Judul &amp; kategori akan terisi otomatis — Anda tinggal menentukan tanggal dan jamnya.
+              </p>
+              <select
+                value={selectedRescheduleId}
+                onChange={(e) => handleRescheduleSelect(e.target.value)}
+                className="w-full text-sm p-2.5 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none bg-white transition"
+              >
+                <option value="">— Tidak, mulai dari kosong —</option>
+                {tidakSesuaiList.map((s: any) => {
+                  const dateLabel = new Date(s.start_time).toLocaleDateString("id-ID", {
+                    day: "2-digit", month: "short", year: "numeric",
+                  });
+                  const title = (s.notes || "(Tanpa judul)").trim();
+                  return (
+                    <option key={s.id} value={String(s.id)}>
+                      {title} — {dateLabel}
+                    </option>
+                  );
+                })}
+              </select>
+              {selectedRescheduleId && (() => {
+                const found = tidakSesuaiList.find((s: any) => String(s.id) === selectedRescheduleId);
+                if (!found?.realizationNotes) return null;
+                return (
+                  <div className="pl-6 text-[11px] text-amber-700/90 italic">
+                    <strong className="not-italic">Catatan kendala sebelumnya:</strong> {found.realizationNotes}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
 
           {/* Pemilihan Tujuan Jadwal (Action Type) */}
           <div className="space-y-2">
@@ -380,7 +486,15 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
 
             <div className="space-y-1">
                <label className="text-sm font-medium text-slate-700">Keperluan / Judul</label>
-               <input required name="notes" type="text" className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none transition" placeholder="Misal: Rapat Evaluasi Bulanan" />
+               <input
+                 required
+                 name="notes"
+                 type="text"
+                 value={notes}
+                 onChange={(e) => setNotes(e.target.value)}
+                 className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none transition"
+                 placeholder="Misal: Rapat Evaluasi Bulanan"
+               />
             </div>
 
             <div className="space-y-1">
@@ -430,6 +544,49 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
             <p className="text-xs text-slate-500">
               Jam kerja kantor: <span className="font-semibold text-slate-700">08:00 - 17:00</span>. Jadwal di luar jam kerja boleh, namun akan diminta konfirmasi terlebih dahulu.
             </p>
+
+            {/* === Jadwal Berulang / Recurring === */}
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={isRecurring}
+                  onChange={(e) => setIsRecurring(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-kai-blue focus:ring-kai-blue"
+                />
+                <span className="text-sm font-semibold text-slate-800">Jadwal Berulang?</span>
+                <span className="text-[11px] text-slate-500">(buat banyak jadwal sekaligus secara rutin)</span>
+              </label>
+
+              {isRecurring && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-6 pt-1">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-600">Frekuensi</label>
+                    <select
+                      value={recurrenceFrequency}
+                      onChange={(e) => setRecurrenceFrequency(e.target.value as 'DAILY' | 'WEEKLY' | 'MONTHLY')}
+                      className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none bg-white transition"
+                    >
+                      <option value="DAILY">Harian</option>
+                      <option value="WEEKLY">Mingguan</option>
+                      <option value="MONTHLY">Bulanan</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-600">Tanggal Berakhir</label>
+                    <input
+                      type="date"
+                      value={recurrenceEndDate}
+                      onChange={(e) => setRecurrenceEndDate(e.target.value)}
+                      className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none transition"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 sm:col-span-2 italic">
+                    Jadwal akan diulang secara otomatis dari Tanggal Mulai sampai Tanggal Berakhir. Maksimal 100 kejadian. Setiap kejadian bersifat mandiri (persetujuan / reschedule / realisasi per tanggal).
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex justify-end pt-5 space-x-3 border-t border-slate-100">

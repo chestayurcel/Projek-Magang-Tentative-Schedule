@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { CheckCircle, XCircle, User, Calendar, Mail, Info, Users } from "lucide-react";
+import { CheckCircle, XCircle, User, Calendar, Mail, Info, Users, RotateCw, Repeat } from "lucide-react";
 import api from "../lib/api";
+import RespondNoteModal, { type RespondAction } from "./RespondNoteModal";
 
 // Tiap item dari /schedules/incoming punya field `kind`:
 //   - PARTICIPANT : group meeting (multi-undangan via tabel ScheduleParticipant)
@@ -8,11 +9,27 @@ import api from "../lib/api";
 //   - DELEGATION  : jadwal dititipkan oleh atasan
 type IncomingKind = "PARTICIPANT" | "MEETING" | "DELEGATION";
 
+// Helper: label frekuensi untuk badge "Jadwal Rutin"
+const frequencyLabel = (freq?: string | null): string | null => {
+  if (!freq) return null;
+  if (freq === "DAILY") return "Jadwal Rutin Harian";
+  if (freq === "WEEKLY") return "Jadwal Rutin Mingguan";
+  if (freq === "MONTHLY") return "Jadwal Rutin Bulanan";
+  return "Jadwal Rutin";
+};
+
 export default function IncomingSchedules() {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  // Gunakan composite key (kind + id) karena PARTICIPANT pakai scheduleId yang sama dgn schedule
   const [processing, setProcessing] = useState<string | null>(null);
+
+  // State modal note (untuk Reject & Reschedule)
+  const [noteModal, setNoteModal] = useState<{
+    action: RespondAction;
+    scheduleId: number;
+    kind: IncomingKind;
+    title: string;
+  } | null>(null);
 
   useEffect(() => {
     fetchIncoming();
@@ -30,20 +47,41 @@ export default function IncomingSchedules() {
     }
   };
 
-  const handleRespond = async (
-    scheduleId: number,
-    kind: IncomingKind,
-    action: "approve" | "reject"
-  ) => {
-    const label = action === "approve" ? "menyetujui" : "menolak";
-    if (!confirm(`Apakah Anda yakin ingin ${label} undangan jadwal ini?`)) return;
-
+  // === APPROVE: cukup confirm, lalu kirim ===
+  const handleApprove = async (scheduleId: number, kind: IncomingKind) => {
+    if (!confirm("Apakah Anda yakin ingin menerima undangan jadwal ini?")) return;
     const key = `${kind}-${scheduleId}`;
     setProcessing(key);
     try {
-      const res = await api.patch(`/schedules/${scheduleId}/respond`, { action, kind });
+      const res = await api.patch(`/schedules/${scheduleId}/respond`, { action: "approve", kind });
       alert(res.data.message);
       setSchedules(prev => prev.filter(s => `${s.kind}-${s.id}` !== key));
+    } catch (err: any) {
+      alert(err.response?.data?.error || "Gagal merespons.");
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  // === REJECT / RESCHEDULE: buka modal untuk note dulu ===
+  const openNoteModal = (action: RespondAction, scheduleId: number, kind: IncomingKind, title: string) => {
+    setNoteModal({ action, scheduleId, kind, title });
+  };
+
+  const submitNoteResponse = async (note: string) => {
+    if (!noteModal) return;
+    const { action, scheduleId, kind } = noteModal;
+    const key = `${kind}-${scheduleId}`;
+    setProcessing(key);
+    try {
+      const res = await api.patch(`/schedules/${scheduleId}/respond`, {
+        action,
+        kind,
+        responseNote: note,
+      });
+      alert(res.data.message);
+      setSchedules(prev => prev.filter(s => `${s.kind}-${s.id}` !== key));
+      setNoteModal(null);
     } catch (err: any) {
       alert(err.response?.data?.error || "Gagal merespons.");
     } finally {
@@ -122,6 +160,14 @@ export default function IncomingSchedules() {
                       {s.notes || "Jadwal Tanpa Judul"}
                     </h3>
 
+                    {/* Badge Jadwal Rutin (kalau ada recurrenceGroupId) */}
+                    {s.recurrenceGroupId && (
+                      <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200" title="Menyetujui ini akan otomatis berlaku untuk seluruh rangkaian jadwal rutin">
+                        <Repeat size={12} />
+                        {frequencyLabel(s.recurrenceFrequency) || "Jadwal Rutin"}
+                      </div>
+                    )}
+
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
                       <span className="flex items-center">
                         <User size={14} className="mr-1.5 text-amber-500" />
@@ -140,10 +186,10 @@ export default function IncomingSchedules() {
                     </div>
                   </div>
 
-                  {/* Tombol Aksi */}
-                  <div className="flex items-center space-x-2 shrink-0 self-start sm:self-center">
+                  {/* Tombol Aksi: Terima / Reschedule / Tolak */}
+                  <div className="flex flex-wrap items-center gap-2 shrink-0 self-start sm:self-center">
                     <button
-                      onClick={() => handleRespond(s.id, kind, "approve")}
+                      onClick={() => handleApprove(s.id, kind)}
                       disabled={isProcessing}
                       className="flex items-center px-3.5 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition disabled:opacity-50 shadow-sm"
                     >
@@ -151,7 +197,15 @@ export default function IncomingSchedules() {
                       Terima
                     </button>
                     <button
-                      onClick={() => handleRespond(s.id, kind, "reject")}
+                      onClick={() => openNoteModal("reschedule", s.id, kind, s.notes || "Jadwal Tanpa Judul")}
+                      disabled={isProcessing}
+                      className="flex items-center px-3.5 py-2 border border-amber-300 text-amber-700 bg-amber-50 text-sm font-medium rounded-lg hover:bg-amber-100 transition disabled:opacity-50"
+                    >
+                      <RotateCw size={16} className="mr-1.5" />
+                      Reschedule
+                    </button>
+                    <button
+                      onClick={() => openNoteModal("reject", s.id, kind, s.notes || "Jadwal Tanpa Judul")}
                       disabled={isProcessing}
                       className="flex items-center px-3.5 py-2 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition disabled:opacity-50"
                     >
@@ -165,6 +219,16 @@ export default function IncomingSchedules() {
           );
         })}
       </div>
+
+      {/* Modal note untuk Reject & Reschedule */}
+      <RespondNoteModal
+        isOpen={noteModal !== null}
+        action={noteModal?.action ?? null}
+        scheduleTitle={noteModal?.title}
+        isSubmitting={processing !== null}
+        onSubmit={submitNoteResponse}
+        onCancel={() => setNoteModal(null)}
+      />
     </div>
   );
 }

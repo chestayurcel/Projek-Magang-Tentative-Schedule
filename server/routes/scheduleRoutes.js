@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
-const { getSchedules, createSchedule, getPendingSchedules, approveSchedule, rejectSchedule, getIncomingSchedules, respondSchedule, getRecapData } = require('../controllers/scheduleController');
+const { getSchedules, createSchedule, getPendingSchedules, approveSchedule, rejectSchedule, getIncomingSchedules, respondSchedule, getRecapData, updateScheduleRealization, getTidakSesuaiSchedules } = require('../controllers/scheduleController');
 
 // GET /api/schedules?view=GLOBAL|MY
 router.get('/', verifyToken, getSchedules);
@@ -15,6 +15,10 @@ router.get('/incoming', verifyToken, getIncomingSchedules);
 // GET /api/schedules/recap (Rekapitulasi jadwal untuk role manajemen)
 router.get('/recap', verifyToken, verifyRole('SUPER_ADMIN', 'MANAJER', 'ASISTEN_MANAJER'), getRecapData);
 
+// GET /api/schedules/tidak-sesuai (Daftar jadwal lampau user yg dievaluasi 'Tidak Sesuai',
+// untuk fitur reschedule di Modal Tambah Jadwal)
+router.get('/tidak-sesuai', verifyToken, getTidakSesuaiSchedules);
+
 // POST /api/schedules
 router.post('/', verifyToken, createSchedule);
 
@@ -26,5 +30,8 @@ router.patch('/:id/reject', verifyToken, verifyRole('SUPER_ADMIN', 'MANAJER', 'A
 
 // PATCH /api/schedules/:id/respond (User target menyetujui/menolak undangan)
 router.patch('/:id/respond', verifyToken, respondSchedule);
+
+// PUT /api/schedules/:id/realization (Pemilik atau Manajemen mengisi realisasi kegiatan)
+router.put('/:id/realization', verifyToken, updateScheduleRealization);
 
 module.exports = router;

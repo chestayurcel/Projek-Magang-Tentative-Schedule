@@ -49,8 +49,18 @@ export default function NotificationBell() {
   // Format teks pesan per jenis notifikasi
   const messageFor = (s: any): string => {
     const title = s.notes || "Jadwal Tanpa Judul";
+    if (s.participantStatus === "RESCHEDULED") return `Reschedule diajukan untuk: ${title}`;
     if (s.kind === "DELEGATION") return `Pengajuan delegasi jadwal: ${title}`;
     return `Ada undangan meeting: ${title}`;
+  };
+
+  // Label frekuensi untuk badge "Jadwal Rutin"
+  const frequencyLabel = (freq?: string | null): string | null => {
+    if (!freq) return null;
+    if (freq === "DAILY") return "Rutin Harian";
+    if (freq === "WEEKLY") return "Rutin Mingguan";
+    if (freq === "MONTHLY") return "Rutin Bulanan";
+    return "Rutin";
   };
 
   const senderFor = (s: any): string => {
@@ -108,9 +118,16 @@ export default function NotificationBell() {
                   <p className="text-sm text-slate-700 leading-snug">
                     {messageFor(s)}
                   </p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Dari <span className="font-medium text-slate-600">{senderFor(s)}</span>
-                  </p>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <p className="text-xs text-slate-400">
+                      Dari <span className="font-medium text-slate-600">{senderFor(s)}</span>
+                    </p>
+                    {s.recurrenceGroupId && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        {frequencyLabel(s.recurrenceFrequency) || "Rutin"}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))
             )}

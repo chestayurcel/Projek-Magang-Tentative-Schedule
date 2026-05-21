@@ -67,9 +67,14 @@ export default function LandingPage() {
             </div>
 
             {/* ===== Kolom Kanan ===== */}
-            <div>
+            <div className="space-y-2">
               <p>
                 Dikembangkan oleh Chesta Yurcel Zebada, S1 Teknologi Informasi Universitas Muhammadiyah Yogyakarta.
+              </p>
+              <p>
+                <a href="tel:087886698385" className="hover:text-slate-900 transition-colors">087886698385</a>
+                {" · "}
+                <a href="mailto:chestayurcel@gmail.com" className="hover:text-slate-900 transition-colors">chestayurcel@gmail.com</a>
               </p>
             </div>
 

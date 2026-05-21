@@ -39,6 +39,12 @@ enum ScheduleStatus {
   RESCHEDULED
 }
 
+enum RealizationStatus {
+  BELUM_DIISI
+  SESUAI
+  TIDAK_SESUAI
+}
+
 model User {
   id               Int           @id @default(autoincrement())
   nipp             String        @unique
@@ -114,24 +120,44 @@ model Schedule {
   status         ScheduleStatus   @default(PENDING)
   category       ScheduleCategory @default(PRIBADI)
   notes          String?          @db.Text
+  responseNote   String?          @db.Text
+
+  realizationStatus RealizationStatus @default(BELUM_DIISI)
+  realizationNotes  String?           @db.Text
+
+  // Penanda apakah jadwal "TIDAK_SESUAI" ini sudah pernah dijadwalkan ulang.
+  // True kalau user pernah membuat jadwal baru dengan memilih referensi ini di
+  // dropdown "Jadwalkan Ulang" pada Modal Tambah Jadwal. Dipakai utk meng-exclude
+  // dari dropdown agar tidak terjadi duplikasi reschedule.
+  hasBeenRescheduled Boolean @default(false)
+
+  // Penanda untuk rangkaian jadwal rutin/berulang. Semua jadwal hasil duplikasi
+  // dari satu form recurring akan share UUID yang sama. NULL = jadwal tunggal.
+  recurrenceGroupId   String?
+  // Frekuensi rangkaian: 'DAILY' | 'WEEKLY' | 'MONTHLY' — disimpan per row utk
+  // memudahkan UI menampilkan label "Jadwal Rutin Mingguan/Bulanan/Harian".
+  recurrenceFrequency String?
 
   participants   ScheduleParticipant[]
 
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
+
+  @@index([recurrenceGroupId])
 }
 
 model ScheduleParticipant {
-  id         Int            @id @default(autoincrement())
-  scheduleId Int
-  userId     Int
-  status     ScheduleStatus @default(PENDING)
+  id           Int            @id @default(autoincrement())
+  scheduleId   Int
+  userId       Int
+  status       ScheduleStatus @default(PENDING)
+  responseNote String?        @db.Text
 
-  schedule   Schedule       @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-  user       User           @relation(fields: [userId], references: [id])
+  schedule     Schedule       @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [userId], references: [id])
 
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   @@unique([scheduleId, userId])
   @@index([userId])

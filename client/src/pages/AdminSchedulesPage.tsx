@@ -1,7 +1,16 @@
 import { useState, useEffect } from "react";
-import { CheckCircle, XCircle, Clock, User, Calendar, Mail, Users, Info } from "lucide-react";
+import { CheckCircle, XCircle, Clock, User, Calendar, Mail, Users, Info, RotateCw, Repeat } from "lucide-react";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import RespondNoteModal, { type RespondAction } from "../components/RespondNoteModal";
+
+const frequencyLabel = (freq?: string | null): string | null => {
+  if (!freq) return null;
+  if (freq === "DAILY") return "Jadwal Rutin Harian";
+  if (freq === "WEEKLY") return "Jadwal Rutin Mingguan";
+  if (freq === "MONTHLY") return "Jadwal Rutin Bulanan";
+  return "Jadwal Rutin";
+};
 
 export default function AdminSchedulesPage() {
   const { user } = useAuth();
@@ -78,16 +87,47 @@ export default function AdminSchedulesPage() {
   };
 
   // ===== Handler: Personal invite (PATCH /schedules/:id/respond, kind=PARTICIPANT) =====
-  const handleInviteRespond = async (scheduleId: number, action: "approve" | "reject") => {
-    const label = action === "approve" ? "menerima" : "menolak";
-    if (!confirm(`Apakah Anda yakin ingin ${label} undangan jadwal ini?`)) return;
-
+  // APPROVE: confirm langsung
+  const handleInviteApprove = async (scheduleId: number) => {
+    if (!confirm("Apakah Anda yakin ingin menerima undangan jadwal ini?")) return;
     const key = `INVITE-${scheduleId}`;
     setProcessing(key);
     try {
-      const res = await api.patch(`/schedules/${scheduleId}/respond`, { action, kind: "PARTICIPANT" });
+      const res = await api.patch(`/schedules/${scheduleId}/respond`, { action: "approve", kind: "PARTICIPANT" });
       alert(res.data.message);
       setMyInvites(prev => prev.filter(s => s.id !== scheduleId));
+    } catch (err: any) {
+      alert(err.response?.data?.error || "Gagal merespons.");
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  // REJECT / RESCHEDULE: buka modal note
+  const [noteModal, setNoteModal] = useState<{
+    action: RespondAction;
+    scheduleId: number;
+    title: string;
+  } | null>(null);
+
+  const openInviteNoteModal = (action: RespondAction, scheduleId: number, title: string) => {
+    setNoteModal({ action, scheduleId, title });
+  };
+
+  const submitInviteNote = async (note: string) => {
+    if (!noteModal) return;
+    const { action, scheduleId } = noteModal;
+    const key = `INVITE-${scheduleId}`;
+    setProcessing(key);
+    try {
+      const res = await api.patch(`/schedules/${scheduleId}/respond`, {
+        action,
+        kind: "PARTICIPANT",
+        responseNote: note,
+      });
+      alert(res.data.message);
+      setMyInvites(prev => prev.filter(s => s.id !== scheduleId));
+      setNoteModal(null);
     } catch (err: any) {
       alert(err.response?.data?.error || "Gagal merespons.");
     } finally {
@@ -172,6 +212,13 @@ export default function AdminSchedulesPage() {
                             {s.notes || "Jadwal Tanpa Judul"}
                           </h3>
 
+                          {s.recurrenceGroupId && (
+                            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200" title="Menyetujui satu kali akan berlaku untuk seluruh rangkaian">
+                              <Repeat size={12} />
+                              {frequencyLabel(s.recurrenceFrequency) || "Jadwal Rutin"}
+                            </div>
+                          )}
+
                           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-500">
                             <span className="flex items-center">
                               <User size={14} className="mr-1.5 text-amber-500" />
@@ -190,19 +237,27 @@ export default function AdminSchedulesPage() {
                           </div>
                         </div>
 
-                        <div className="flex items-center space-x-2 shrink-0 self-start sm:self-center">
+                        <div className="flex flex-wrap items-center gap-2 shrink-0 self-start sm:self-center">
                           <button
-                            onClick={() => handleInviteRespond(s.id, "approve")}
+                            onClick={() => handleInviteApprove(s.id)}
                             disabled={isProcessing}
-                            className="flex items-center px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition disabled:opacity-50 shadow-sm"
+                            className="flex items-center px-3.5 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition disabled:opacity-50 shadow-sm"
                           >
                             <CheckCircle size={16} className="mr-1.5" />
                             Terima
                           </button>
                           <button
-                            onClick={() => handleInviteRespond(s.id, "reject")}
+                            onClick={() => openInviteNoteModal("reschedule", s.id, s.notes || "Jadwal Tanpa Judul")}
                             disabled={isProcessing}
-                            className="flex items-center px-4 py-2 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition disabled:opacity-50"
+                            className="flex items-center px-3.5 py-2 border border-amber-300 text-amber-700 bg-amber-50 text-sm font-medium rounded-lg hover:bg-amber-100 transition disabled:opacity-50"
+                          >
+                            <RotateCw size={16} className="mr-1.5" />
+                            Reschedule
+                          </button>
+                          <button
+                            onClick={() => openInviteNoteModal("reject", s.id, s.notes || "Jadwal Tanpa Judul")}
+                            disabled={isProcessing}
+                            className="flex items-center px-3.5 py-2 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition disabled:opacity-50"
                           >
                             <XCircle size={16} className="mr-1.5" />
                             Tolak
@@ -310,6 +365,16 @@ export default function AdminSchedulesPage() {
           )}
         </>
       )}
+
+      {/* Modal note untuk Reject & Reschedule pada Undangan Meeting */}
+      <RespondNoteModal
+        isOpen={noteModal !== null}
+        action={noteModal?.action ?? null}
+        scheduleTitle={noteModal?.title}
+        isSubmitting={processing !== null}
+        onSubmit={submitInviteNote}
+        onCancel={() => setNoteModal(null)}
+      />
     </div>
   );
 }

@@ -3,8 +3,9 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import { X, Calendar, Clock, User, Tag, CheckCircle2, AlertCircle, Users } from "lucide-react";
+import { X, Calendar, Clock, User, Tag, CheckCircle2, AlertCircle, Users, ClipboardCheck, Edit3 } from "lucide-react";
 import api from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 
 interface ParticipantInfo {
   id: number;
@@ -13,6 +14,8 @@ interface ParticipantInfo {
   role?: string;
   status: string;
 }
+
+type RealizationStatus = "BELUM_DIISI" | "SESUAI" | "TIDAK_SESUAI";
 
 interface CalendarEvent {
   id: string;
@@ -28,14 +31,20 @@ interface CalendarEvent {
     category: string;
     notes: string | null;
     creatorName: string | null;
+    creatorId: number | null;
     guestName: string | null;
     unitName: string | null;
     participants: ParticipantInfo[];
+    realizationStatus: RealizationStatus;
+    realizationNotes: string | null;
+    hasBeenRescheduled: boolean;
+    startTimeIso: string;
+    endTimeIso: string;
   };
 }
 
 interface CalendarViewProps {
-  currentView: "PRIBADI" | "UNIT" | "BERSAMA";
+  currentView: "PRIBADI" | "UNIT" | "BERSAMA" | "TIDAK_SESUAI";
   userId?: number;
 }
 
@@ -60,6 +69,8 @@ const statusBadge = (status: string) => {
       return { bg: "bg-green-100", text: "text-green-700", label: "Disetujui" };
     case "PENDING":
       return { bg: "bg-amber-100", text: "text-amber-700", label: "Menunggu" };
+    case "RESCHEDULED":
+      return { bg: "bg-orange-100", text: "text-orange-700", label: "Reschedule Diajukan" };
     case "REJECTED":
       return { bg: "bg-red-100", text: "text-red-700", label: "Ditolak" };
     default:
@@ -68,10 +79,18 @@ const statusBadge = (status: string) => {
 };
 
 export default function CalendarView({ currentView, userId }: CalendarViewProps) {
+  const { user } = useAuth();
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // ===== Form realisasi (state form di dalam detail modal) =====
+  const [realStatus, setRealStatus] = useState<RealizationStatus>("BELUM_DIISI");
+  const [realNotes, setRealNotes] = useState("");
+  const [isEditingReal, setIsEditingReal] = useState(false); // toggle edit kalau sudah pernah diisi
+  const [isSavingReal, setIsSavingReal] = useState(false);
+  const [realError, setRealError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchSchedules();
@@ -95,6 +114,13 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
          data = data.filter((s: any) => s.category === "UNIT");
       } else if (currentView === "BERSAMA") {
          data = data.filter((s: any) => s.category === "BERSAMA");
+      } else if (currentView === "TIDAK_SESUAI") {
+         // Monitoring: hanya jadwal yang dievaluasi 'Tidak Sesuai' DAN punya keterangan/alasan
+         data = data.filter((s: any) =>
+           s.realizationStatus === "TIDAK_SESUAI"
+           && typeof s.realizationNotes === "string"
+           && s.realizationNotes.trim().length > 0
+         );
       }
       
       const mapped = data.map((s: any) => mapToCalendarEvent(s));
@@ -110,17 +136,19 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
   const mapToCalendarEvent = (schedule: any): CalendarEvent => {
     const isGuest = schedule.type === "TAMU";
 
-    // Hitung status efektif: untuk group meeting (punya participants), tampilkan
-    // sebagai PENDING selama masih ada peserta yang belum merespons (status PENDING).
-    // Backend selalu set Schedule.status=APPROVED utk MEETING, tapi visual kalender
-    // harus mencerminkan apakah undangan sudah dikonfirmasi semua peserta.
-    let effectiveStatus = schedule.status;
+    // Hitung status efektif: untuk group meeting (punya participants), kalau
+    // ada peserta yang belum APPROVE, anggap PENDING. Kalau ada yg RESCHEDULED,
+    // anggap RESCHEDULED. Tujuan: visual kalender mencerminkan apakah undangan
+    // sudah dikonfirmasi semua peserta.
+    let effectiveStatus: string = schedule.status;
     if (Array.isArray(schedule.participants) && schedule.participants.length > 0) {
       const hasPending = schedule.participants.some((p: any) => p.status === "PENDING");
+      const hasReschedule = schedule.participants.some((p: any) => p.status === "RESCHEDULED");
       if (hasPending) effectiveStatus = "PENDING";
+      else if (hasReschedule) effectiveStatus = "RESCHEDULED";
     }
 
-    // Skema warna berdasarkan jenis
+    // Skema warna berdasarkan jenis (warna solid untuk APPROVED)
     let bg = "#3b82f6"; // Biru default (Jadwal Bersama)
     let border = "#2563eb";
 
@@ -135,13 +163,25 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
       border = "#059669";
     }
 
-    // Status non-APPROVED override warna kategori (pakai status efektif, bukan raw)
+    // Untuk status non-APPROVED, pakai warna transparan supaya visual jelas
+    // jadwal masih tentative dan tidak terlihat seperti jadwal yang sudah pasti.
     if (effectiveStatus === "PENDING") {
-      bg = "#94a3b8";    // Abu-abu untuk Pending
-      border = "#64748b";
+      bg = "rgba(148, 163, 184, 0.45)";   // Abu-abu transparan utk Pending
+      border = "rgba(100, 116, 139, 0.75)";
+    } else if (effectiveStatus === "RESCHEDULED") {
+      bg = "rgba(245, 158, 11, 0.45)";    // Amber transparan utk Reschedule request
+      border = "rgba(217, 119, 6, 0.75)";
     } else if (effectiveStatus === "REJECTED") {
-      bg = "#ef4444";    // Merah untuk Ditolak
-      border = "#dc2626";
+      bg = "rgba(239, 68, 68, 0.45)";     // Merah transparan utk Ditolak
+      border = "rgba(220, 38, 38, 0.75)";
+    }
+
+    // Override khusus untuk tab "Jadwal Tidak Sesuai" — warna merah solid yang
+    // sangat kontras supaya manajer langsung fokus melihat jadwal-jadwal yang
+    // performanya bermasalah di lapangan.
+    if (currentView === "TIDAK_SESUAI") {
+      bg = "#dc2626";    // red-600 solid
+      border = "#991b1b"; // red-900 solid
     }
 
     // Judul event
@@ -177,9 +217,15 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
         category: schedule.category,
         notes: schedule.notes,
         creatorName: schedule.user?.name || null,
+        creatorId: schedule.user_id ?? schedule.user?.id ?? null,
         guestName: schedule.guest?.name || null,
         unitName: schedule.user?.unit?.unit_name || null,
         participants,
+        realizationStatus: (schedule.realizationStatus || "BELUM_DIISI") as RealizationStatus,
+        realizationNotes: schedule.realizationNotes ?? null,
+        hasBeenRescheduled: !!schedule.hasBeenRescheduled,
+        startTimeIso: schedule.start_time,
+        endTimeIso: schedule.end_time,
       },
     };
   };
@@ -187,6 +233,64 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setSelectedEvent(null);
+    setIsEditingReal(false);
+    setRealError(null);
+  };
+
+  // Saat event di-klik, isi state form realisasi dgn data existing
+  const handleEventClick = (info: any) => {
+    setSelectedEvent(info.event);
+    const ext = info.event.extendedProps;
+    setRealStatus((ext.realizationStatus as RealizationStatus) || "BELUM_DIISI");
+    setRealNotes(ext.realizationNotes || "");
+    setIsEditingReal(false);
+    setRealError(null);
+    setIsModalOpen(true);
+  };
+
+  // Simpan realisasi ke backend
+  const handleSaveRealization = async () => {
+    if (!selectedEvent) return;
+    if (realStatus === "BELUM_DIISI") {
+      setRealError("Silakan pilih 'Sesuai' atau 'Tidak Sesuai' terlebih dahulu.");
+      return;
+    }
+    setIsSavingReal(true);
+    setRealError(null);
+    try {
+      const id = selectedEvent.id;
+      const res = await api.put(`/schedules/${id}/realization`, {
+        realizationStatus: realStatus,
+        realizationNotes: realNotes,
+      });
+      const updated = res.data.schedule;
+
+      // Update extendedProps di FullCalendar event
+      selectedEvent.setExtendedProp("realizationStatus", updated.realizationStatus);
+      selectedEvent.setExtendedProp("realizationNotes", updated.realizationNotes);
+
+      // Sinkronkan juga ke state `events` lokal agar konsisten
+      setEvents((prev) =>
+        prev.map((e) =>
+          e.id === String(id)
+            ? {
+                ...e,
+                extendedProps: {
+                  ...e.extendedProps,
+                  realizationStatus: updated.realizationStatus,
+                  realizationNotes: updated.realizationNotes,
+                },
+              }
+            : e
+        )
+      );
+
+      setIsEditingReal(false);
+    } catch (err: any) {
+      setRealError(err.response?.data?.error || "Gagal menyimpan realisasi.");
+    } finally {
+      setIsSavingReal(false);
+    }
   };
 
   // Custom render untuk blok event di kalender
@@ -233,33 +337,46 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
   return (
     <>
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-        {/* Legenda Warna */}
-        <div className="flex flex-wrap items-center gap-4 mb-5 pb-4 border-b border-slate-100">
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-[#3b82f6]"></span>
-            <span className="text-xs text-slate-600">Bersama</span>
+        {/* Legenda Warna — kontekstual berdasarkan tab aktif */}
+        {currentView === "TIDAK_SESUAI" ? (
+          <div className="flex items-center gap-2 mb-5 pb-4 border-b border-slate-100">
+            <span className="inline-block w-3 h-3 rounded-full bg-[#dc2626] border border-[#991b1b]"></span>
+            <p className="text-xs text-slate-600">
+              Menampilkan jadwal yang dievaluasi <strong className="text-red-600">Tidak Sesuai</strong> oleh pemiliknya beserta keterangan kendalanya.
+            </p>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-[#8b5cf6]"></span>
-            <span className="text-xs text-slate-600">Unit</span>
+        ) : (
+          <div className="flex flex-wrap items-center gap-4 mb-5 pb-4 border-b border-slate-100">
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-[#3b82f6]"></span>
+              <span className="text-xs text-slate-600">Bersama</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-[#8b5cf6]"></span>
+              <span className="text-xs text-slate-600">Unit</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-[#10b981]"></span>
+              <span className="text-xs text-slate-600">Pribadi</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-[#f59e0b]"></span>
+              <span className="text-xs text-slate-600">Tamu</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: "rgba(148, 163, 184, 0.45)", border: "1px solid rgba(100,116,139,0.75)" }}></span>
+              <span className="text-xs text-slate-600">Pending</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: "rgba(245, 158, 11, 0.45)", border: "1px solid rgba(217,119,6,0.75)" }}></span>
+              <span className="text-xs text-slate-600">Reschedule</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: "rgba(239, 68, 68, 0.45)", border: "1px solid rgba(220,38,38,0.75)" }}></span>
+              <span className="text-xs text-slate-600">Ditolak</span>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-[#10b981]"></span>
-            <span className="text-xs text-slate-600">Pribadi</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-[#f59e0b]"></span>
-            <span className="text-xs text-slate-600">Tamu</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-[#94a3b8]"></span>
-            <span className="text-xs text-slate-600">Pending</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-[#ef4444]"></span>
-            <span className="text-xs text-slate-600">Ditolak</span>
-          </div>
-        </div>
+        )}
 
         <FullCalendar
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
@@ -282,10 +399,7 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
           dayMaxEvents={3}
           nowIndicator={true}
           eventContent={renderEventContent}
-          eventClick={(info) => {
-            setSelectedEvent(info.event);
-            setIsModalOpen(true);
-          }}
+          eventClick={handleEventClick}
         />
       </div>
 
@@ -296,11 +410,11 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
           onClick={handleCloseModal}
         >
           <div
-            className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-200"
+            className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-[#00529b] to-[#0F1551] px-6 py-4 flex justify-between items-start">
+            <div className="bg-gradient-to-r from-[#00529b] to-[#0F1551] px-6 py-4 flex justify-between items-start shrink-0">
               <div className="flex-1 mr-4">
                 <h3 className="text-lg font-bold text-white leading-tight">
                   {selectedEvent.title}
@@ -338,8 +452,8 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="px-6 py-5 space-y-4">
+            {/* Modal Body — scrollable saat konten lebih tinggi dari viewport */}
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
               {/* Waktu Pelaksanaan */}
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 p-2 rounded-lg bg-blue-50">
@@ -464,10 +578,225 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
                   </div>
                 </div>
               )}
+
+              {/* ===== SECTION: REALISASI KEGIATAN ===== */}
+              {(() => {
+                const ext = selectedEvent.extendedProps;
+                const isApproved = ext.status === "APPROVED";
+                const eventEnded = ext.endTimeIso ? new Date(ext.endTimeIso) < new Date() : false;
+                const isFilled = ext.realizationStatus && ext.realizationStatus !== "BELUM_DIISI";
+                const isOwner = ext.creatorId != null && ext.creatorId === user?.id;
+                const isManagement =
+                  user?.role === "SUPER_ADMIN" ||
+                  user?.role === "MANAJER" ||
+                  user?.role === "ASISTEN_MANAJER";
+                const canEdit = isOwner || isManagement;
+                const canFillNow = isApproved && eventEnded && canEdit;
+
+                let unavailableReason: string | null = null;
+                if (!isApproved) unavailableReason = "Belum bisa diisi — jadwal belum APPROVED.";
+                else if (!eventEnded) unavailableReason = "Belum bisa diisi — kegiatan belum selesai.";
+
+                const realBadge = (s: string) => {
+                  if (s === "SESUAI") return { bg: "bg-green-100", text: "text-green-700", label: "Sesuai" };
+                  if (s === "TIDAK_SESUAI") return { bg: "bg-red-100", text: "text-red-700", label: "Tidak Sesuai" };
+                  return { bg: "bg-slate-100", text: "text-slate-700", label: "Belum diisi" };
+                };
+
+                const showingResult = isFilled && !isEditingReal;
+                const showingForm = canFillNow && (!isFilled || isEditingReal);
+
+                return (
+                  <div className="flex items-start gap-3 pt-3 border-t border-slate-100">
+                    <div className="mt-0.5 p-2 rounded-lg bg-indigo-50">
+                      <ClipboardCheck size={16} className="text-indigo-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                        Realisasi Kegiatan
+                      </p>
+
+                      {/* Kasus 1: Belum bisa diisi (PENDING / belum selesai) */}
+                      {unavailableReason && (
+                        <p className="text-sm text-slate-500 mt-1.5 italic">{unavailableReason}</p>
+                      )}
+
+                      {/* Kasus 2: Sudah diisi → tampilkan read-only result */}
+                      {!unavailableReason && showingResult && (
+                        <div className="mt-1.5 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {(() => {
+                              const b = realBadge(ext.realizationStatus);
+                              return (
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${b.bg} ${b.text}`}
+                                >
+                                  {ext.realizationStatus === "SESUAI" ? (
+                                    <CheckCircle2 size={12} />
+                                  ) : (
+                                    <AlertCircle size={12} />
+                                  )}
+                                  {b.label}
+                                </span>
+                              );
+                            })()}
+                            {ext.hasBeenRescheduled && (
+                              <span
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700"
+                                title="Jadwal ini sudah dibuatkan penggantinya"
+                              >
+                                <CheckCircle2 size={12} />
+                                Sudah dijadwalkan ulang
+                              </span>
+                            )}
+                          </div>
+                          {ext.realizationNotes && (
+                            <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100 whitespace-pre-wrap">
+                              {ext.realizationNotes}
+                            </p>
+                          )}
+                          {canEdit && (
+                            <button
+                              onClick={() => setIsEditingReal(true)}
+                              className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-kai-blue transition-colors"
+                            >
+                              <Edit3 size={12} />
+                              Ubah
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Kasus 3: Belum diisi / sedang edit & user punya hak → tampilkan form */}
+                      {!unavailableReason && showingForm && (
+                        <div className="mt-2 space-y-3">
+                          <div>
+                            <label className="text-xs font-medium text-slate-600 mb-1.5 block">
+                              Status Pelaksanaan
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                              <label
+                                className={`cursor-pointer flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-all ${
+                                  realStatus === "SESUAI"
+                                    ? "border-green-500 bg-green-50"
+                                    : "border-slate-200 hover:border-slate-300"
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name="realStatus"
+                                  value="SESUAI"
+                                  checked={realStatus === "SESUAI"}
+                                  onChange={() => setRealStatus("SESUAI")}
+                                  className="sr-only"
+                                />
+                                <CheckCircle2
+                                  size={14}
+                                  className={realStatus === "SESUAI" ? "text-green-600" : "text-slate-400"}
+                                />
+                                <span
+                                  className={`text-sm font-medium ${
+                                    realStatus === "SESUAI" ? "text-green-700" : "text-slate-600"
+                                  }`}
+                                >
+                                  Sesuai
+                                </span>
+                              </label>
+                              <label
+                                className={`cursor-pointer flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-all ${
+                                  realStatus === "TIDAK_SESUAI"
+                                    ? "border-red-500 bg-red-50"
+                                    : "border-slate-200 hover:border-slate-300"
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name="realStatus"
+                                  value="TIDAK_SESUAI"
+                                  checked={realStatus === "TIDAK_SESUAI"}
+                                  onChange={() => setRealStatus("TIDAK_SESUAI")}
+                                  className="sr-only"
+                                />
+                                <AlertCircle
+                                  size={14}
+                                  className={
+                                    realStatus === "TIDAK_SESUAI" ? "text-red-600" : "text-slate-400"
+                                  }
+                                />
+                                <span
+                                  className={`text-sm font-medium ${
+                                    realStatus === "TIDAK_SESUAI" ? "text-red-700" : "text-slate-600"
+                                  }`}
+                                >
+                                  Tidak Sesuai
+                                </span>
+                              </label>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-medium text-slate-600 mb-1.5 block">
+                              Keterangan / Catatan Realisasi
+                            </label>
+                            <textarea
+                              value={realNotes}
+                              onChange={(e) => setRealNotes(e.target.value)}
+                              placeholder="Mis: Rapat berjalan lancar. / Hanya 3 dari 5 peserta hadir, agenda B tidak terbahas."
+                              rows={3}
+                              maxLength={1000}
+                              className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none transition resize-none"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1 text-right">
+                              {realNotes.length} / 1000
+                            </p>
+                          </div>
+
+                          {realError && (
+                            <div className="text-xs text-red-600 bg-red-50 border border-red-100 px-2.5 py-2 rounded-lg">
+                              {realError}
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleSaveRealization}
+                              disabled={isSavingReal}
+                              className="flex items-center px-3.5 py-2 bg-kai-blue text-white text-sm font-medium rounded-lg hover:bg-[#1a2170] transition disabled:opacity-50 shadow-sm"
+                            >
+                              {isSavingReal ? "Menyimpan…" : "Simpan Realisasi"}
+                            </button>
+                            {isFilled && isEditingReal && (
+                              <button
+                                onClick={() => {
+                                  setIsEditingReal(false);
+                                  setRealStatus(ext.realizationStatus as RealizationStatus);
+                                  setRealNotes(ext.realizationNotes || "");
+                                  setRealError(null);
+                                }}
+                                disabled={isSavingReal}
+                                className="flex items-center px-3.5 py-2 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-100 transition disabled:opacity-50"
+                              >
+                                Batal
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Kasus 4: Sudah selesai & APPROVED tapi user tidak punya hak edit */}
+                      {!unavailableReason && !showingResult && !showingForm && (
+                        <p className="text-sm text-slate-500 mt-1.5 italic">
+                          Belum diisi oleh pemilik jadwal.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Modal Footer */}
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
               <button
                 onClick={handleCloseModal}
                 className="w-full py-2.5 px-4 rounded-lg border-2 border-slate-300 text-slate-600 font-semibold text-sm hover:bg-slate-100 hover:border-slate-400 transition-all duration-200"
