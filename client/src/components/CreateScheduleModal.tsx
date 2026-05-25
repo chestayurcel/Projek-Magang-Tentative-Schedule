@@ -50,10 +50,22 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
   const [tidakSesuaiList, setTidakSesuaiList] = useState<any[]>([]);
   const [selectedRescheduleId, setSelectedRescheduleId] = useState<string>("");
 
+  // === Tanggal mulai & selesai (controlled, dengan auto-sync) ===
+  // Default: kedua-duanya hari ini, karena mayoritas kegiatan selesai di hari yang sama.
+  // User boleh override tanggal selesai untuk acara multi-hari (mis. dinas luar kota).
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+
   // === Jadwal Berulang / Recurring ===
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceFrequency, setRecurrenceFrequency] = useState<'DAILY' | 'WEEKLY' | 'MONTHLY'>('WEEKLY');
   const [recurrenceEndDate, setRecurrenceEndDate] = useState("");
+
+  // Helper: format Date ke YYYY-MM-DD (untuk <input type="date" value=...>)
+  const toDateInputValue = (d: Date): string => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
 
   const isAdmin = user?.role === "SUPER_ADMIN" || user?.role === "MANAJER" || user?.role === "ASISTEN_MANAJER";
 
@@ -78,8 +90,21 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
       setIsRecurring(false);
       setRecurrenceFrequency('WEEKLY');
       setRecurrenceEndDate("");
+
+      // Default tanggal mulai & selesai = hari ini (sebagian besar kegiatan
+      // KAI diselesaikan di hari yang sama)
+      const today = toDateInputValue(new Date());
+      setStartDate(today);
+      setEndDate(today);
     }
   }, [isOpen, user?.id]);
+
+  // Handler: ketika tanggal mulai diubah, auto-sync tanggal selesai untuk
+  // mengikuti. User tetap bisa override end_date secara manual setelah ini.
+  const handleStartDateChange = (newStart: string) => {
+    setStartDate(newStart);
+    setEndDate(newStart);
+  };
 
   // Handler dropdown "Jadwalkan Ulang" — auto-fill form berdasarkan jadwal lama
   const handleRescheduleSelect = (id: string) => {
@@ -526,7 +551,14 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-sm font-medium text-slate-700">Tanggal Mulai</label>
-                <input required name="start_date" type="date" className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none transition" />
+                <input
+                  required
+                  name="start_date"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => handleStartDateChange(e.target.value)}
+                  className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none transition"
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium text-slate-700">Jam Mulai</label>
@@ -534,7 +566,15 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium text-slate-700">Tanggal Selesai</label>
-                <input required name="end_date" type="date" className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none transition" />
+                <input
+                  required
+                  name="end_date"
+                  type="date"
+                  value={endDate}
+                  min={startDate || undefined}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-kai-blue outline-none transition"
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium text-slate-700">Jam Selesai</label>

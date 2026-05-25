@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { CheckCircle, XCircle, Clock, User, Calendar, Mail, Users, Info, RotateCw, Repeat } from "lucide-react";
+import { CheckCircle, XCircle, Clock, User, Calendar, Mail, Users, Info, RotateCw, Repeat, Edit3, Trash2, FileEdit } from "lucide-react";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import RespondNoteModal, { type RespondAction } from "../components/RespondNoteModal";
@@ -21,6 +21,8 @@ export default function AdminSchedulesPage() {
   const [adminPending, setAdminPending] = useState<any[]>([]);
   // Undangan meeting (PARTICIPANT) yang menargetkan user yang sedang login
   const [myInvites, setMyInvites] = useState<any[]>([]);
+  // Pengajuan perubahan jadwal (EDIT / DELETE) dari bawahan (management only)
+  const [changeRequests, setChangeRequests] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   // Composite key (kind + id) supaya admin queue & personal invite tidak bentrok
   const [processing, setProcessing] = useState<string | null>(null);
@@ -33,27 +35,50 @@ export default function AdminSchedulesPage() {
   const fetchAll = async () => {
     setIsLoading(true);
     try {
-      // Selalu fetch incoming (semua role bisa)
       const incomingPromise = api.get("/schedules/incoming");
-
-      // Fetch admin queue HANYA jika user adalah admin
-      // (endpoint /schedules/pending require role SUPER_ADMIN/MANAJER/ASISTEN_MANAJER,
-      //  jika dipanggil oleh staff/supervisor → 403 → interceptor auto-logout. Jangan!)
-      const pendingPromise = isAdmin
-        ? api.get("/schedules/pending")
+      const pendingPromise = isAdmin ? api.get("/schedules/pending") : Promise.resolve({ data: [] });
+      const changeReqPromise = isAdmin
+        ? api.get("/schedules/change-requests/pending")
         : Promise.resolve({ data: [] });
 
-      const [pendingRes, incomingRes] = await Promise.all([pendingPromise, incomingPromise]);
+      const [pendingRes, incomingRes, changeReqRes] = await Promise.all([
+        pendingPromise, incomingPromise, changeReqPromise,
+      ]);
 
       setAdminPending(Array.isArray(pendingRes.data) ? pendingRes.data : []);
-      // Hanya tarik kind=PARTICIPANT (group meeting invite). MEETING legacy &
-      // DELEGATION sudah masuk ke /schedules/pending sehingga tidak perlu di-double.
       const incoming = Array.isArray(incomingRes.data) ? incomingRes.data : [];
       setMyInvites(incoming.filter((s: any) => s.kind === "PARTICIPANT"));
+      setChangeRequests(Array.isArray(changeReqRes.data) ? changeReqRes.data : []);
     } catch (err) {
       console.error(err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // ===== Handler: Review change request =====
+  const handleReviewChangeRequest = async (crId: number, action: "approve" | "reject") => {
+    const label = action === "approve" ? "menyetujui" : "menolak";
+    if (!confirm(`Anda yakin ingin ${label} pengajuan ini?`)) return;
+
+    let reviewNote: string | null = null;
+    if (action === "reject") {
+      reviewNote = prompt("Alasan penolakan (opsional):") || null;
+    }
+
+    const key = `CR-${crId}`;
+    setProcessing(key);
+    try {
+      const res = await api.patch(`/schedules/change-requests/${crId}/review`, {
+        action,
+        reviewNote,
+      });
+      alert(res.data?.message || "Berhasil diproses.");
+      setChangeRequests((prev) => prev.filter((cr) => cr.id !== crId));
+    } catch (err: any) {
+      alert(err.response?.data?.error || "Gagal memproses pengajuan.");
+    } finally {
+      setProcessing(null);
     }
   };
 
@@ -151,7 +176,7 @@ export default function AdminSchedulesPage() {
     );
   }
 
-  const totalInbox = adminPending.length + myInvites.length;
+  const totalInbox = adminPending.length + myInvites.length + changeRequests.length;
 
   return (
     <div className="space-y-6">
@@ -271,7 +296,114 @@ export default function AdminSchedulesPage() {
             </div>
           )}
 
-          {/* ========== SECTION 2: ADMIN QUEUE (Pending Schedule Approvals) ========== */}
+          {/* ========== SECTION 2: CHANGE REQUESTS (Edit/Delete pengajuan dari bawahan) ========== */}
+          {changeRequests.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <FileEdit size={18} className="text-rose-500" />
+                <h2 className="text-lg font-bold text-slate-800">
+                  Pengajuan Perubahan Jadwal
+                  <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-700">
+                    {changeRequests.length}
+                  </span>
+                </h2>
+              </div>
+              <p className="text-sm text-slate-500 -mt-1">
+                Permintaan Edit atau Hapus jadwal dari pegawai bawahan yang menunggu persetujuan Anda.
+              </p>
+
+              {changeRequests.map((cr: any) => {
+                const key = `CR-${cr.id}`;
+                const isProcessing = processing === key;
+                const isEdit = cr.type === "EDIT";
+                const accent = isEdit ? "border-blue-200 bg-blue-50/30 border-l-blue-500" : "border-red-200 bg-red-50/30 border-l-red-500";
+
+                return (
+                  <div key={cr.id} className={`bg-white rounded-xl shadow-sm border ${accent.split(" ").filter(c => c.startsWith("border-")).join(" ")} overflow-hidden hover:shadow-md transition-shadow`}>
+                    <div className={`border-l-4 ${isEdit ? "border-l-blue-500" : "border-l-red-500"} p-5`}>
+                      <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <div className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border ${isEdit ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-red-50 text-red-700 border-red-200"}`}>
+                            {isEdit ? <Edit3 size={14} className="mr-1.5" /> : <Trash2 size={14} className="mr-1.5" />}
+                            {isEdit
+                              ? `Pengajuan EDIT dari ${cr.requester?.name || "—"}`
+                              : `Pengajuan HAPUS dari ${cr.requester?.name || "—"}`}
+                          </div>
+
+                          <h3 className="text-lg font-semibold text-slate-800 truncate">
+                            {cr.schedule?.notes || "Jadwal Tanpa Judul"}
+                          </h3>
+
+                          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-500">
+                            <span className="flex items-center">
+                              <User size={14} className="mr-1.5 text-slate-400" />
+                              {cr.requester?.name} <span className="ml-1 text-xs text-slate-400">({cr.requester?.role?.replace("_", " ")})</span>
+                            </span>
+                            <span className="flex items-center">
+                              <Calendar size={14} className="mr-1.5 text-slate-400" />
+                              {formatDate(cr.schedule?.start_time)} — {formatDate(cr.schedule?.end_time)}
+                            </span>
+                            <span className="flex items-center">
+                              <Clock size={14} className="mr-1.5 text-slate-400" />
+                              Diajukan {formatDate(cr.createdAt)}
+                            </span>
+                          </div>
+
+                          {/* Detail perubahan untuk EDIT */}
+                          {isEdit && (
+                            <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-100 space-y-1 text-xs">
+                              <p className="font-semibold text-slate-600 uppercase tracking-wider text-[10px]">Detail Perubahan:</p>
+                              {cr.proposedNotes !== null && cr.proposedNotes !== cr.schedule?.notes && (
+                                <p className="text-slate-700"><strong>Judul:</strong> "{cr.schedule?.notes || '-'}" → "{cr.proposedNotes}"</p>
+                              )}
+                              {cr.proposedStartTime && (
+                                <p className="text-slate-700"><strong>Mulai:</strong> {formatDate(cr.schedule?.start_time)} → {formatDate(cr.proposedStartTime)}</p>
+                              )}
+                              {cr.proposedEndTime && (
+                                <p className="text-slate-700"><strong>Selesai:</strong> {formatDate(cr.schedule?.end_time)} → {formatDate(cr.proposedEndTime)}</p>
+                              )}
+                              {cr.proposedCategory && cr.proposedCategory !== cr.schedule?.category && (
+                                <p className="text-slate-700"><strong>Kategori:</strong> {cr.schedule?.category} → {cr.proposedCategory}</p>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Alasan dari pengaju */}
+                          {cr.requestNote && (
+                            <div className="mt-2 p-3 bg-amber-50 rounded-lg border border-amber-100">
+                              <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider mb-1">Alasan / Catatan Pengaju:</p>
+                              <p className="text-sm text-amber-900 leading-relaxed whitespace-pre-wrap">{cr.requestNote}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center space-x-2 shrink-0 self-start sm:self-center">
+                          <button
+                            onClick={() => handleReviewChangeRequest(cr.id, "approve")}
+                            disabled={isProcessing}
+                            className="flex items-center px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition disabled:opacity-50 shadow-sm"
+                          >
+                            <CheckCircle size={16} className="mr-1.5" />
+                            Terima
+                          </button>
+                          <button
+                            onClick={() => handleReviewChangeRequest(cr.id, "reject")}
+                            disabled={isProcessing}
+                            className="flex items-center px-4 py-2 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition disabled:opacity-50"
+                          >
+                            <XCircle size={16} className="mr-1.5" />
+                            Tolak
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ========== SECTION 3: ADMIN QUEUE (Pending Schedule Approvals) ========== */}
           {adminPending.length > 0 && (
             <div className="space-y-3">
               <div className="flex items-center gap-2">

@@ -1,7 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
-const { getSchedules, createSchedule, getPendingSchedules, approveSchedule, rejectSchedule, getIncomingSchedules, respondSchedule, getRecapData, updateScheduleRealization, getTidakSesuaiSchedules } = require('../controllers/scheduleController');
+const {
+  getSchedules, createSchedule, getPendingSchedules, approveSchedule, rejectSchedule,
+  getIncomingSchedules, respondSchedule, getRecapData, updateScheduleRealization,
+  getTidakSesuaiSchedules,
+  updateScheduleDirect, deleteScheduleDirect,
+  submitChangeRequest, listPendingChangeRequests, reviewChangeRequest,
+} = require('../controllers/scheduleController');
 
 // GET /api/schedules?view=GLOBAL|MY
 router.get('/', verifyToken, getSchedules);
@@ -33,5 +39,17 @@ router.patch('/:id/respond', verifyToken, respondSchedule);
 
 // PUT /api/schedules/:id/realization (Pemilik atau Manajemen mengisi realisasi kegiatan)
 router.put('/:id/realization', verifyToken, updateScheduleRealization);
+
+// === Edit / Delete Workflow ===
+// PUT /api/schedules/:id — direct edit (management only, role check di controller)
+router.put('/:id', verifyToken, updateScheduleDirect);
+// DELETE /api/schedules/:id — direct delete (management only, role check di controller)
+router.delete('/:id', verifyToken, deleteScheduleDirect);
+// POST /api/schedules/:id/change-request — staff/supervisor ajukan EDIT atau DELETE
+router.post('/:id/change-request', verifyToken, submitChangeRequest);
+// GET /api/schedules/change-requests/pending — antrian pengajuan utk manajemen
+router.get('/change-requests/pending', verifyToken, listPendingChangeRequests);
+// PATCH /api/schedules/change-requests/:id/review — manajemen approve/reject
+router.patch('/change-requests/:id/review', verifyToken, reviewChangeRequest);
 
 module.exports = router;

@@ -3,9 +3,12 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import { X, Calendar, Clock, User, Tag, CheckCircle2, AlertCircle, Users, ClipboardCheck, Edit3 } from "lucide-react";
+import { X, Calendar, Clock, User, Tag, CheckCircle2, AlertCircle, Users, ClipboardCheck, Edit3, Trash2 } from "lucide-react";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import EditScheduleModal from "./EditScheduleModal";
+
+const MANAGEMENT_ROLES = ["SUPER_ADMIN", "MANAJER", "ASISTEN_MANAJER"];
 
 interface ParticipantInfo {
   id: number;
@@ -92,6 +95,11 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
   const [isSavingReal, setIsSavingReal] = useState(false);
   const [realError, setRealError] = useState<string | null>(null);
 
+  // ===== Edit & Delete schedule =====
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const isManagement = !!user && MANAGEMENT_ROLES.includes(user.role);
+
   useEffect(() => {
     fetchSchedules();
   }, [currentView]);
@@ -176,12 +184,21 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
       border = "rgba(220, 38, 38, 0.75)";
     }
 
-    // Override khusus untuk tab "Jadwal Tidak Sesuai" — warna merah solid yang
-    // sangat kontras supaya manajer langsung fokus melihat jadwal-jadwal yang
-    // performanya bermasalah di lapangan.
-    if (currentView === "TIDAK_SESUAI") {
+    // Override REALISASI 'Tidak Sesuai' — solid red yang tegas, berlaku di
+    // semua tab. Tujuannya supaya semua pegawai langsung tahu bahwa kegiatan
+    // ini sudah dievaluasi & tidak terlaksana sesuai rencana, terlepas dari
+    // kategori asli atau status approval-nya.
+    if (schedule.realizationStatus === "TIDAK_SESUAI") {
       bg = "#dc2626";    // red-600 solid
       border = "#991b1b"; // red-900 solid
+    }
+
+    // Override khusus untuk tab "Jadwal Tidak Sesuai" — pakai warna yang sama
+    // (solid red) untuk konsistensi visual antara tampilan filtered & tampilan
+    // gabungan.
+    if (currentView === "TIDAK_SESUAI") {
+      bg = "#dc2626";
+      border = "#991b1b";
     }
 
     // Judul event
@@ -246,6 +263,62 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
     setIsEditingReal(false);
     setRealError(null);
     setIsModalOpen(true);
+  };
+
+  // === Edit jadwal — buka modal terpisah ===
+  const handleOpenEdit = () => {
+    setEditModalOpen(true);
+  };
+
+  // Dipanggil setelah EditScheduleModal sukses save/submit
+  const handleEditSaved = () => {
+    setIsModalOpen(false); // tutup detail modal
+    setSelectedEvent(null);
+    fetchSchedules(); // refresh kalender
+  };
+
+  // === Hapus jadwal ===
+  const handleDelete = async () => {
+    if (!selectedEvent) return;
+    const id = parseInt(selectedEvent.id);
+
+    if (isManagement) {
+      if (!confirm("Yakin ingin MENGHAPUS jadwal ini? Aksi ini tidak dapat dibatalkan.")) return;
+      setIsDeleting(true);
+      try {
+        const res = await api.delete(`/schedules/${id}`);
+        alert(res.data?.message || "Jadwal berhasil dihapus.");
+        setIsModalOpen(false);
+        setSelectedEvent(null);
+        fetchSchedules();
+      } catch (err: any) {
+        alert(err.response?.data?.error || "Gagal menghapus jadwal.");
+      } finally {
+        setIsDeleting(false);
+      }
+    } else {
+      // Staff/Supervisor → submit pengajuan DELETE
+      const reason = prompt("Ajukan penghapusan jadwal — isi alasan untuk atasan:");
+      if (reason === null) return; // user cancel
+      if (!reason.trim()) {
+        alert("Alasan penghapusan wajib diisi untuk diajukan ke atasan.");
+        return;
+      }
+      setIsDeleting(true);
+      try {
+        const res = await api.post(`/schedules/${id}/change-request`, {
+          type: "DELETE",
+          requestNote: reason.trim(),
+        });
+        alert(res.data?.message || "Pengajuan hapus terkirim, menunggu review atasan.");
+        setIsModalOpen(false);
+        setSelectedEvent(null);
+      } catch (err: any) {
+        alert(err.response?.data?.error || "Gagal mengajukan penghapusan.");
+      } finally {
+        setIsDeleting(false);
+      }
+    }
   };
 
   // Simpan realisasi ke backend
@@ -374,6 +447,10 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
             <div className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded-full" style={{ backgroundColor: "rgba(239, 68, 68, 0.45)", border: "1px solid rgba(220,38,38,0.75)" }}></span>
               <span className="text-xs text-slate-600">Ditolak</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-[#dc2626] border border-[#991b1b]"></span>
+              <span className="text-xs text-slate-600">Tidak Sesuai</span>
             </div>
           </div>
         )}
@@ -795,18 +872,64 @@ export default function CalendarView({ currentView, userId }: CalendarViewProps)
               })()}
             </div>
 
-            {/* Modal Footer */}
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
-              <button
-                onClick={handleCloseModal}
-                className="w-full py-2.5 px-4 rounded-lg border-2 border-slate-300 text-slate-600 font-semibold text-sm hover:bg-slate-100 hover:border-slate-400 transition-all duration-200"
-              >
-                Tutup
-              </button>
-            </div>
+            {/* Modal Footer — Edit / Hapus / Tutup */}
+            {/* Tombol Edit/Hapus HANYA muncul untuk pembuat jadwal (creatorId === me)
+                atau untuk role manajemen yang punya hak eksekusi global. */}
+            {(() => {
+              const isCreator = selectedEvent.extendedProps.creatorId != null
+                && selectedEvent.extendedProps.creatorId === user?.id;
+              const canEditDelete = isCreator || isManagement;
+
+              return (
+                <div className="px-6 py-3 border-t border-slate-100 bg-slate-50/50 shrink-0 flex items-center gap-2">
+                  {canEditDelete && (
+                    <>
+                      <button
+                        onClick={handleOpenEdit}
+                        disabled={isDeleting}
+                        title={isManagement ? "Edit jadwal langsung" : "Ajukan perubahan ke atasan"}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg bg-kai-blue text-white font-semibold text-sm hover:bg-[#1a2170] transition disabled:opacity-50 shadow-sm"
+                      >
+                        <Edit3 size={14} />
+                        {isManagement ? "Edit" : "Ajukan Edit"}
+                      </button>
+                      <button
+                        onClick={handleDelete}
+                        disabled={isDeleting}
+                        title={isManagement ? "Hapus jadwal langsung" : "Ajukan penghapusan ke atasan"}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg border border-red-300 text-red-600 font-semibold text-sm hover:bg-red-50 transition disabled:opacity-50"
+                      >
+                        <Trash2 size={14} />
+                        {isDeleting ? "Memproses…" : isManagement ? "Hapus" : "Ajukan Hapus"}
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={handleCloseModal}
+                    className={`${canEditDelete ? "py-2.5 px-4" : "flex-1 py-2.5 px-4"} rounded-lg border-2 border-slate-300 text-slate-600 font-semibold text-sm hover:bg-slate-100 hover:border-slate-400 transition`}
+                  >
+                    Tutup
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
+
+      {/* Modal Edit/Pengajuan Perubahan Jadwal */}
+      <EditScheduleModal
+        isOpen={editModalOpen}
+        scheduleId={selectedEvent ? parseInt(selectedEvent.id) : null}
+        initial={selectedEvent ? {
+          notes: selectedEvent.extendedProps?.notes ?? null,
+          start_time: selectedEvent.extendedProps?.startTimeIso || selectedEvent.start?.toISOString() || "",
+          end_time: selectedEvent.extendedProps?.endTimeIso || selectedEvent.end?.toISOString() || "",
+          category: (selectedEvent.extendedProps?.category as "PRIBADI" | "UNIT" | "BERSAMA") || "PRIBADI",
+        } : null}
+        onClose={() => setEditModalOpen(false)}
+        onSaved={handleEditSaved}
+      />
     </>
   );
 }

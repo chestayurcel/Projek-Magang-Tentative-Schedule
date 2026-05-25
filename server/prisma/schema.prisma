@@ -45,6 +45,19 @@ enum RealizationStatus {
   TIDAK_SESUAI
 }
 
+// Tipe pengajuan perubahan jadwal — EDIT (ubah field) atau DELETE (hapus jadwal)
+enum ChangeRequestType {
+  EDIT
+  DELETE
+}
+
+// Status workflow pengajuan
+enum ChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model User {
   id               Int           @id @default(autoincrement())
   nipp             String        @unique
@@ -63,6 +76,8 @@ model User {
   targetedSchedules Schedule[]   @relation("TargetUserSchedules")
   createdSchedules Schedule[]    @relation("CreatorSchedules")
   participantOf    ScheduleParticipant[]
+  changeRequestsAsRequester ScheduleChangeRequest[] @relation("ChangeRequestRequester")
+  changeRequestsAsReviewer  ScheduleChangeRequest[] @relation("ChangeRequestReviewer")
 
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -139,11 +154,47 @@ model Schedule {
   recurrenceFrequency String?
 
   participants   ScheduleParticipant[]
+  changeRequests ScheduleChangeRequest[]
 
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
   @@index([recurrenceGroupId])
+}
+
+// Pengajuan perubahan jadwal (EDIT atau DELETE) dari role bawahan.
+// Atasan (SUPER_ADMIN/MANAJER/ASISTEN_MANAJER) bypass dan langsung eksekusi.
+model ScheduleChangeRequest {
+  id          Int                  @id @default(autoincrement())
+  scheduleId  Int
+  schedule    Schedule             @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  requesterId Int
+  requester   User                 @relation("ChangeRequestRequester", fields: [requesterId], references: [id])
+
+  type        ChangeRequestType
+  status      ChangeRequestStatus  @default(PENDING)
+
+  // Untuk EDIT: simpan nilai yang diajukan (NULL = field tidak diubah)
+  proposedNotes      String?           @db.Text
+  proposedStartTime  DateTime?
+  proposedEndTime    DateTime?
+  proposedCategory   ScheduleCategory?
+
+  // Catatan/alasan dari pengaju
+  requestNote String?              @db.Text
+  // Catatan dari atasan saat approve/reject
+  reviewNote  String?              @db.Text
+  reviewerId  Int?
+  reviewer    User?                @relation("ChangeRequestReviewer", fields: [reviewerId], references: [id])
+  reviewedAt  DateTime?
+
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([status])
+  @@index([scheduleId])
+  @@index([requesterId])
 }
 
 model ScheduleParticipant {

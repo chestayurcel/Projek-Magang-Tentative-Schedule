@@ -374,7 +374,18 @@ async function createSchedule(req, res) {
   }
 }
 
-module.exports = { getSchedules, createSchedule, getPendingSchedules, approveSchedule, rejectSchedule, getIncomingSchedules, respondSchedule, getRecapData, updateScheduleRealization, getTidakSesuaiSchedules };
+module.exports = {
+  getSchedules, createSchedule, getPendingSchedules, approveSchedule, rejectSchedule,
+  getIncomingSchedules, respondSchedule, getRecapData, updateScheduleRealization,
+  getTidakSesuaiSchedules,
+  // Edit/Delete + Change Request Workflow
+  updateScheduleDirect, deleteScheduleDirect,
+  submitChangeRequest, listPendingChangeRequests, reviewChangeRequest,
+};
+
+// Constants & helpers
+const MANAGEMENT_ROLES = ['SUPER_ADMIN', 'MANAJER', 'ASISTEN_MANAJER'];
+const isManagementRole = (role) => MANAGEMENT_ROLES.includes(role);
 
 /**
  * GET /api/schedules/pending
@@ -1030,5 +1041,256 @@ async function getTidakSesuaiSchedules(req, res) {
   } catch (error) {
     console.error('getTidakSesuaiSchedules error:', error);
     return res.status(500).json({ error: 'Gagal mengambil daftar jadwal Tidak Sesuai.' });
+  }
+}
+
+// ============================================================================
+// EDIT / DELETE WORKFLOW
+// ----------------------------------------------------------------------------
+// - Role manajemen (SUPER_ADMIN/MANAJER/ASISTEN_MANAJER) → eksekusi langsung
+//   via PUT /:id atau DELETE /:id
+// - Role bawahan (STAFF/SUPERVISOR/dll) → harus mengajukan via
+//   POST /:id/change-request, lalu di-review manajemen.
+// ============================================================================
+
+/**
+ * PUT /api/schedules/:id — direct edit (management only)
+ * Body: { notes?, start_time?, end_time?, category? }
+ */
+async function updateScheduleDirect(req, res) {
+  const userRole = req.user.role;
+  if (!isManagementRole(userRole)) {
+    return res.status(403).json({
+      error: 'Hanya role manajemen yang dapat mengedit langsung. Silakan ajukan perubahan via change-request.',
+    });
+  }
+  const scheduleId = parseInt(req.params.id);
+  const { notes, start_time, end_time, category } = req.body;
+
+  try {
+    const existing = await prisma.schedule.findUnique({ where: { id: scheduleId } });
+    if (!existing) return res.status(404).json({ error: 'Jadwal tidak ditemukan.' });
+
+    const updateData = {};
+    if (notes !== undefined) updateData.notes = notes;
+    if (start_time) updateData.start_time = new Date(start_time);
+    if (end_time) updateData.end_time = new Date(end_time);
+    if (category) updateData.category = category;
+
+    const updated = await prisma.schedule.update({
+      where: { id: scheduleId },
+      data: updateData,
+    });
+    return res.status(200).json({ message: 'Jadwal berhasil diperbarui.', schedule: updated });
+  } catch (error) {
+    console.error('updateScheduleDirect error:', error);
+    return res.status(500).json({ error: 'Gagal mengupdate jadwal.' });
+  }
+}
+
+/**
+ * DELETE /api/schedules/:id — direct delete (management only)
+ */
+async function deleteScheduleDirect(req, res) {
+  const userRole = req.user.role;
+  if (!isManagementRole(userRole)) {
+    return res.status(403).json({
+      error: 'Hanya role manajemen yang dapat menghapus langsung. Silakan ajukan penghapusan via change-request.',
+    });
+  }
+  const scheduleId = parseInt(req.params.id);
+  try {
+    await prisma.schedule.delete({ where: { id: scheduleId } });
+    return res.status(200).json({ message: 'Jadwal berhasil dihapus.' });
+  } catch (error) {
+    console.error('deleteScheduleDirect error:', error);
+    return res.status(500).json({ error: 'Gagal menghapus jadwal.' });
+  }
+}
+
+/**
+ * POST /api/schedules/:id/change-request — submit pengajuan perubahan
+ * Body untuk EDIT: { type: 'EDIT', proposedNotes?, proposedStartTime?, proposedEndTime?, proposedCategory?, requestNote? }
+ * Body untuk DELETE: { type: 'DELETE', requestNote? }
+ */
+async function submitChangeRequest(req, res) {
+  const userId = req.user.id;
+  const scheduleId = parseInt(req.params.id);
+  const { type, proposedNotes, proposedStartTime, proposedEndTime, proposedCategory, requestNote } = req.body;
+
+  if (!['EDIT', 'DELETE'].includes(type)) {
+    return res.status(400).json({ error: 'Type harus EDIT atau DELETE.' });
+  }
+
+  try {
+    const schedule = await prisma.schedule.findUnique({ where: { id: scheduleId } });
+    if (!schedule) return res.status(404).json({ error: 'Jadwal tidak ditemukan.' });
+
+    // Pengaju harus punya relasi ke jadwal (owner, target, creator delegasi, atau participant)
+    const isOwner = schedule.user_id === userId;
+    const isTarget = schedule.target_user_id === userId;
+    const isCreator = schedule.created_by === userId;
+    let isParticipant = false;
+    if (!isOwner && !isTarget && !isCreator) {
+      const p = await prisma.scheduleParticipant.findFirst({ where: { scheduleId, userId } });
+      isParticipant = !!p;
+    }
+    if (!isOwner && !isTarget && !isCreator && !isParticipant) {
+      return res.status(403).json({ error: 'Anda tidak memiliki hak terhadap jadwal ini.' });
+    }
+
+    // Cegah double-submit
+    const existing = await prisma.scheduleChangeRequest.findFirst({
+      where: { scheduleId, status: 'PENDING' },
+    });
+    if (existing) {
+      return res.status(400).json({
+        error: 'Sudah ada pengajuan perubahan yang menunggu review untuk jadwal ini.',
+      });
+    }
+
+    const cleanNote = typeof requestNote === 'string' ? requestNote.trim().slice(0, 500) : null;
+    const data = {
+      scheduleId,
+      requesterId: userId,
+      type,
+      status: 'PENDING',
+      requestNote: cleanNote,
+    };
+
+    if (type === 'EDIT') {
+      if (proposedNotes !== undefined && proposedNotes !== null) data.proposedNotes = String(proposedNotes);
+      if (proposedStartTime) data.proposedStartTime = new Date(proposedStartTime);
+      if (proposedEndTime) data.proposedEndTime = new Date(proposedEndTime);
+      if (proposedCategory && ['PRIBADI', 'UNIT', 'BERSAMA'].includes(proposedCategory)) {
+        data.proposedCategory = proposedCategory;
+      }
+      // Validasi: harus ada minimal 1 field yang diubah
+      const hasAnyChange =
+        data.proposedNotes !== undefined ||
+        data.proposedStartTime !== undefined ||
+        data.proposedEndTime !== undefined ||
+        data.proposedCategory !== undefined;
+      if (!hasAnyChange) {
+        return res.status(400).json({ error: 'Pengajuan edit harus memuat minimal 1 perubahan field.' });
+      }
+    }
+
+    const cr = await prisma.scheduleChangeRequest.create({ data });
+    return res.status(201).json({
+      message: type === 'EDIT'
+        ? 'Pengajuan edit jadwal terkirim, menunggu review atasan.'
+        : 'Pengajuan hapus jadwal terkirim, menunggu review atasan.',
+      changeRequest: cr,
+    });
+  } catch (error) {
+    console.error('submitChangeRequest error:', error);
+    return res.status(500).json({ error: 'Gagal mengajukan perubahan.' });
+  }
+}
+
+/**
+ * GET /api/change-requests/pending — list semua pengajuan PENDING (management only)
+ */
+async function listPendingChangeRequests(req, res) {
+  const userRole = req.user.role;
+  if (!isManagementRole(userRole)) {
+    return res.status(403).json({ error: 'Hanya role manajemen yang dapat melihat antrian pengajuan.' });
+  }
+  try {
+    const requests = await prisma.scheduleChangeRequest.findMany({
+      where: { status: 'PENDING' },
+      include: {
+        requester: { select: { id: true, name: true, nipp: true, role: true, jabatan: true } },
+        schedule: {
+          include: {
+            user: { select: { id: true, name: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return res.status(200).json(requests);
+  } catch (error) {
+    console.error('listPendingChangeRequests error:', error);
+    return res.status(500).json({ error: 'Gagal memuat antrian pengajuan.' });
+  }
+}
+
+/**
+ * PATCH /api/change-requests/:id/review — atasan approve/reject (management only)
+ * Body: { action: 'approve' | 'reject', reviewNote? }
+ *
+ * Pada APPROVE:
+ *   - EDIT  → apply proposed fields ke schedule, status CR = APPROVED
+ *   - DELETE → hapus schedule (cascade-delete CR), tidak ada record CR setelahnya
+ * Pada REJECT:
+ *   - Status CR = REJECTED, schedule tetap utuh
+ */
+async function reviewChangeRequest(req, res) {
+  const userId = req.user.id;
+  const userRole = req.user.role;
+  if (!isManagementRole(userRole)) {
+    return res.status(403).json({ error: 'Hanya role manajemen yang dapat me-review pengajuan.' });
+  }
+  const crId = parseInt(req.params.id);
+  const { action, reviewNote } = req.body;
+  if (!['approve', 'reject'].includes(action)) {
+    return res.status(400).json({ error: 'Aksi harus approve atau reject.' });
+  }
+  const cleanReview = typeof reviewNote === 'string' ? reviewNote.trim().slice(0, 500) : null;
+
+  try {
+    const cr = await prisma.scheduleChangeRequest.findUnique({
+      where: { id: crId },
+      include: { schedule: true, requester: { select: { name: true } } },
+    });
+    if (!cr) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
+    if (cr.status !== 'PENDING') {
+      return res.status(400).json({ error: 'Pengajuan ini sudah pernah di-review.' });
+    }
+
+    const now = new Date();
+
+    if (action === 'reject') {
+      await prisma.scheduleChangeRequest.update({
+        where: { id: crId },
+        data: { status: 'REJECTED', reviewNote: cleanReview, reviewerId: userId, reviewedAt: now },
+      });
+      return res.status(200).json({
+        message: `Pengajuan ${cr.type === 'EDIT' ? 'edit' : 'hapus'} dari ${cr.requester.name} ditolak.`,
+      });
+    }
+
+    // Approve path
+    if (cr.type === 'EDIT') {
+      const updateData = {};
+      if (cr.proposedNotes !== null) updateData.notes = cr.proposedNotes;
+      if (cr.proposedStartTime) updateData.start_time = cr.proposedStartTime;
+      if (cr.proposedEndTime) updateData.end_time = cr.proposedEndTime;
+      if (cr.proposedCategory) updateData.category = cr.proposedCategory;
+
+      await prisma.schedule.update({ where: { id: cr.scheduleId }, data: updateData });
+      await prisma.scheduleChangeRequest.update({
+        where: { id: crId },
+        data: { status: 'APPROVED', reviewNote: cleanReview, reviewerId: userId, reviewedAt: now },
+      });
+      return res.status(200).json({
+        message: `Edit dari ${cr.requester.name} disetujui & diterapkan ke jadwal.`,
+      });
+    }
+
+    if (cr.type === 'DELETE') {
+      // Hapus schedule → cascade-delete CR row juga (FK onDelete: Cascade)
+      await prisma.schedule.delete({ where: { id: cr.scheduleId } });
+      return res.status(200).json({
+        message: `Permintaan hapus dari ${cr.requester.name} disetujui & jadwal telah dihapus.`,
+      });
+    }
+
+    return res.status(400).json({ error: 'Tipe pengajuan tidak dikenali.' });
+  } catch (error) {
+    console.error('reviewChangeRequest error:', error);
+    return res.status(500).json({ error: 'Gagal memproses pengajuan.' });
   }
 }
