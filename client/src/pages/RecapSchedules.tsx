@@ -334,7 +334,7 @@ export default function RecapSchedules() {
       <div className="border-b border-slate-200 pb-5">
         <h1 className="text-3xl font-bold text-kai-blue tracking-tight">Rekapitulasi Jadwal</h1>
         <p className="text-slate-500 mt-1">
-          Buat laporan tentative schedule periodik untuk pelaporan ke level di atasnya. Hanya jadwal berstatus <span className="font-semibold">APPROVED</span> yang akan disertakan.
+          Lihat dan unduh rekap jadwal pada rentang tanggal tertentu. Hanya jadwal berstatus <span className="font-semibold">APPROVED</span> yang ditampilkan.
         </p>
       </div>
 
@@ -530,7 +530,7 @@ export default function RecapSchedules() {
           <FileText size={48} className="mx-auto text-slate-300 mb-3" />
           <p className="text-slate-600 font-medium">Pilih periode lalu klik <span className="text-kai-blue">Muat Data</span></p>
           <p className="text-slate-400 text-sm mt-1">
-            Hasil rekapitulasi dapat di-export ke format Plaintext (kedinasan) atau PDF.
+            Hasil rekapitulasi dapat di-export ke format Plaintext atau PDF.
           </p>
         </div>
       )}

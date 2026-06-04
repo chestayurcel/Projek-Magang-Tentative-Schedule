@@ -15,7 +15,7 @@ export default function DashboardLayout() {
            <h2 className="text-xl font-semibold text-kai-blue tracking-tight">Dashboard Jadwal</h2>
            <div className="flex items-center space-x-3">
              <NotificationBell />
-             <div className="w-px h-8 bg-slate-200 mx-1"></div>
+             <div className="w-px h-8 bg-slate-200 -ml-1 mr-2"></div>
              <div className="text-right mr-2">
                <p className="text-sm font-medium text-slate-800">{user?.name}</p>
                <p className="text-[10px] text-slate-400 uppercase tracking-wider">{user?.unit?.unit_name || user?.role?.replace("_", " ")}</p>

@@ -136,7 +136,7 @@ export default function NotificationBell() {
           {/* Footer Link */}
           <div className="px-4 py-3 bg-slate-50 border-t border-slate-100">
             <Link
-              to="/dashboard"
+              to="/admin/schedules"
               onClick={() => setIsDropdownOpen(false)}
               className="text-xs font-semibold text-kai-blue hover:underline inline-flex items-center"
             >
