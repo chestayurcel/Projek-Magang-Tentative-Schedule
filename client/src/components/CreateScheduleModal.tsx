@@ -313,10 +313,10 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 space-y-2">
               <label className="flex items-start gap-2 text-sm font-bold text-amber-800">
                 <Search size={14} className="text-amber-600 mt-0.5 shrink-0" />
-                <span>Jadwalkan Ulang dari Kegiatan yang Tidak Sesuai?</span>
+                <span>Jadwalkan ulang kegiatan sebelumnya?</span>
               </label>
               <p className="text-[11px] text-amber-700/80 pl-6">
-                Pilih kegiatan lampau yang belum sempat terlaksana. Judul &amp; kategori akan terisi otomatis — Anda tinggal menentukan tanggal dan jamnya.
+                Pilih kegiatan dari daftar — judul dan kategori akan terisi otomatis. Anda cukup mengatur tanggal dan jamnya.
               </p>
               <select
                 value={selectedRescheduleId}
@@ -582,7 +582,7 @@ export default function CreateScheduleModal({ isOpen, onClose, onSuccess }: Moda
               </div>
             </div>
             <p className="text-xs text-slate-500">
-              Jam kerja kantor: <span className="font-semibold text-slate-700">08:00 - 17:00</span>. Jadwal di luar jam kerja boleh, namun akan diminta konfirmasi terlebih dahulu.
+              Jam kerja: <span className="font-semibold text-slate-700">08:00–17:00</span>. Di luar jam tersebut tetap bisa, hanya perlu konfirmasi sebelum disimpan.
             </p>
 
             {/* === Jadwal Berulang / Recurring === */}
