@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Calendar, Users, Building, Settings, LogOut, ChevronDown, ChevronRight, Shield, Activity } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 import { useState, useEffect } from "react";
+import Image from "next/image";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -24,6 +25,7 @@ export function Sidebar() {
   return (
     <aside className="w-64 bg-[#0c1040] text-white flex flex-col h-screen fixed top-0 left-0 shadow-2xl z-50">
       <div className="p-6 border-b border-white/10 bg-[#0a0d36]">
+        <Image src="/logo_kai_putih.png" alt="Logo KAI" width={80} height={30} className="mb-2 object-contain" priority />
         <h1 className="text-2xl font-black tracking-widest text-white">
           KAI <span className="text-[#ff7900]">DAOP 6</span>
         </h1>

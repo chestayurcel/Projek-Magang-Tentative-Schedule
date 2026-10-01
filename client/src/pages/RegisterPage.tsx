@@ -48,7 +48,7 @@ export default function RegisterPage() {
       <div className="absolute inset-0 bg-[#0c1040]/80 backdrop-blur-sm"></div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10">
-        <img src="/logo_kai_putih.png" alt="Logo PT KAI" className="h-10 w-auto mx-auto mt-6" />
+        <img src={`${import.meta.env.BASE_URL}logo_kai_putih.png`} alt="Logo PT KAI" className="h-10 w-auto mx-auto mt-6" />
         <p className="mt-3 text-center text-sm text-slate-300">
           Sistem Manajemen Jadwal Kegiatan
         </p>

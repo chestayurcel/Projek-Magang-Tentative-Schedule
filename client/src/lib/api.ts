@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: import.meta.env.DEV ? 'http://localhost:5000/api' : '/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -24,7 +24,7 @@ api.interceptors.response.use(
       // Token expired atau tidak valid, paksa logout
       localStorage.removeItem('kai_token');
       localStorage.removeItem('kai_user');
-      window.location.href = '/login';
+      window.location.href = '/tentative-schedule/login';
     }
     return Promise.reject(error);
   }

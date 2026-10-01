@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createGuestSchedule, getActiveUsers } from "@/actions/schedule";
+import Image from "next/image";
 
 export default function GuestPage() {
   const [status, setStatus] = useState<"IDLE" | "LOADING" | "SUCCESS" | "ERROR">("IDLE");
@@ -35,7 +36,8 @@ export default function GuestPage() {
   return (
     <div className="min-h-screen bg-kai-bg flex items-center justify-center p-4">
       <div className="max-w-xl w-full bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
-        <div className="bg-kai-blue p-6 text-white text-center">
+        <div className="bg-kai-blue p-6 text-white text-center flex flex-col items-center">
+          <Image src="/logo_kai_putih.png" alt="Logo KAI" width={80} height={30} className="mb-2 object-contain" priority />
           <h1 className="text-2xl font-bold tracking-widest">KAI <span className="text-kai-orange">DAOP 6</span></h1>
           <p className="text-sm opacity-80 mt-1">Formulir Permohonan Kunjungan Tamu Resmi</p>
         </div>

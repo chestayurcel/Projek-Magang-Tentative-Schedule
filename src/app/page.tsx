@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 export default function LandingPage() {
   return (
@@ -18,8 +19,8 @@ export default function LandingPage() {
         
         {/* App Logo / Badge */}
         <div className="mb-8 inline-flex items-center justify-center p-2 rounded-full bg-white/10 backdrop-blur-md border border-white/20 shadow-xl overflow-hidden">
-          <div className="bg-white rounded-full px-5 py-2">
-            <span className="text-[#00529b] font-black text-xl sm:text-2xl tracking-widest">KAI</span>
+          <div className="bg-white rounded-full px-5 py-3 flex items-center justify-center">
+            <Image src="/logo_kai_warna.png" alt="Logo KAI" width={80} height={30} className="object-contain" priority />
           </div>
         </div>
 

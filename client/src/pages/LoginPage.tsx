@@ -31,7 +31,7 @@ export default function LoginPage() {
     <div className="min-h-screen bg-kai-bg flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
         <div className="bg-kai-blue p-8 text-center text-white">
-          <img src="/logo_kai_putih.png" alt="Logo PT KAI" className="h-9 w-auto mx-auto" />
+          <img src={`${import.meta.env.BASE_URL}logo_kai_putih.png`} alt="Logo PT KAI" className="h-9 w-auto mx-auto" />
           <p className="text-sm opacity-80 mt-3">Masuk ke Sistem Jadwal Pegawai</p>
         </div>
         

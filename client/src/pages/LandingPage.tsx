@@ -19,7 +19,7 @@ export default function LandingPage() {
           {/* App Logo */}
           <div className="mb-8">
             <img
-              src="/logo_kai_warna.png"
+              src={`${import.meta.env.BASE_URL}logo_kai_warna.png`}
               alt="Logo PT KAI"
               className="h-16 sm:h-20 w-auto mx-auto drop-shadow-md"
             />

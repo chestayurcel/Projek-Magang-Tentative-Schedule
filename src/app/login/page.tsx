@@ -4,6 +4,7 @@ import { signIn, getSession } from "next-auth/react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,9 +38,10 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-kai-bg flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
-        <div className="bg-kai-blue p-8 text-center text-white">
-          <h1 className="text-3xl font-bold tracking-widest">KAI <span className="text-kai-orange">DAOP 6</span></h1>
-          <p className="text-sm opacity-80 mt-2">Masuk ke Sistem Jadwal Pegawai</p>
+        <div className="bg-kai-blue p-8 text-center text-white flex flex-col items-center">
+          <Image src="/logo_kai_putih.png" alt="Logo KAI" width={80} height={30} className="mb-3 object-contain" priority />
+          <h1 className="text-2xl font-bold tracking-widest mt-1">KAI <span className="text-kai-orange">DAOP 6</span></h1>
+          <p className="text-sm opacity-80 mt-1">Masuk ke Sistem Jadwal Pegawai</p>
         </div>
         
         <form onSubmit={handleLogin} className="p-8 space-y-5">
